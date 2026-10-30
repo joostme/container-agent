@@ -1,10 +1,10 @@
 FROM debian:trixie-slim
 
-# renovate: datasource=github-releases depName=jdx/mise
+# renovate: datasource=github-releases depName=jdx/mise extractVersion=^v(?<version>.+)$
 ARG MISE_VERSION=2026.10.22
-# renovate: datasource=github-releases depName=jdx/pitchfork
+# renovate: datasource=github-releases depName=jdx/pitchfork extractVersion=^v(?<version>.+)$
 ARG PITCHFORK_VERSION=2.32.3
-# renovate: datasource=github-releases depName=mikefarah/yq
+# renovate: datasource=github-releases depName=mikefarah/yq extractVersion=^v(?<version>.+)$
 ARG YQ_VERSION=4.54.1
 ARG TARGETARCH
 

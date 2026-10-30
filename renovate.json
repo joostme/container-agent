@@ -1,4 +1,15 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "customManagers:dockerfileVersions"]
+  "extends": ["config:recommended", "customManagers:dockerfileVersions"],
+  "customManagers": [
+    {
+      "description": "pitchfork schema linked from schema/module.schema.json; same dependency as in the Dockerfile, so both land in one PR",
+      "customType": "regex",
+      "managerFilePatterns": ["/^schema/module\\.schema\\.json$/"],
+      "matchStrings": ["jdx/pitchfork/v(?<currentValue>[0-9.]+)/"],
+      "depNameTemplate": "jdx/pitchfork",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    }
+  ]
 }

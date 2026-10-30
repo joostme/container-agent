@@ -68,7 +68,7 @@ modules/t3/
 └── bin/          # optional: executables put on the PATH, e.g. t3-pair
 ```
 
-`module.toml` has a JSON schema, so editors with a TOML language server (Taplo / Even Better TOML, Tombi) complete and check it. Put this in the first line:
+`module.toml` has a JSON schema, so editors with a TOML language server complete and check it. For daemons it links the schema of the pitchfork version in the image. [Tombi](https://tombi-toml.github.io/tombi/) also flags unknown daemon options such as a misspelled `retry`; Taplo (Even Better TOML) completes them but lets typos through, and pitchfork ignores unknown options silently. Put this in the first line:
 
 ```toml
 #:schema https://raw.githubusercontent.com/joostme/container-agent/main/schema/module.schema.json
@@ -110,9 +110,8 @@ mise, pitchfork and yq are pinned in the `Dockerfile` (Renovate bumps them) and 
 ## Development
 
 ```bash
-mise run lint     # shellcheck, TOML against the schemas, schema up to date
+mise run lint     # shellcheck, TOML against the schemas (tombi), pinned versions match
 mise run test     # module resolution and generated pitchfork config
-mise run schema   # after a pitchfork bump: refresh the daemon part of the schema
 ```
 
-The CI builds the image, starts it with a few modules until it is healthy, and publishes `linux/amd64` and `linux/arm64` to `ghcr.io/joostme/container-agent`.
+Renovate bumps pitchfork in the `Dockerfile` and in the schema link in one PR. The CI builds the image, starts it with a few modules until it is healthy, and publishes `linux/amd64` and `linux/arm64` to `ghcr.io/joostme/container-agent`.

@@ -1,0 +1,12 @@
+#!/bin/bash
+# The module schema links the daemon schema of the pitchfork version in the
+# image; both must name the same version.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+image=$(sed -n 's/^ARG PITCHFORK_VERSION=//p' Dockerfile)
+schema=$(grep -o 'jdx/pitchfork/v[0-9.]*/' schema/module.schema.json | sed 's|jdx/pitchfork/v||; s|/$||')
+if [ "${image}" != "${schema}" ]; then
+    echo "pitchfork ${image} in the Dockerfile, but schema/module.schema.json links ${schema}" >&2
+    exit 1
+fi

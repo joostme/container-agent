@@ -2,21 +2,19 @@
 [tools]
 pitchfork = "2.32.3"
 yq = "4.54.1"
-taplo = "latest"
+# Unlike taplo, tombi supports unevaluatedProperties, which the module schema
+# needs to flag unknown daemon options
+tombi = "1.9.7"
 shellcheck = "latest"
 
 [tasks.lint]
-description = "Check the shell scripts, the TOML files against their schemas and that the module schema is current"
+description = "Check the shell scripts, the TOML files against their schemas and the pinned versions"
 run = [
     "shellcheck image/container-agent image/agent-run modules/*/bin/* scripts/* tests/run",
-    "taplo lint image/mise.toml modules/*/*.toml",
-    "scripts/build-schema --check",
+    "tombi lint image/mise.toml modules/*/*.toml",
+    "scripts/check-versions",
 ]
 
 [tasks.test]
 description = "Test module resolution and the generated pitchfork config"
 run = "tests/run"
-
-[tasks.schema]
-description = "Update the pitchfork part of schema/module.schema.json to the version in the Dockerfile"
-run = "scripts/build-schema"
