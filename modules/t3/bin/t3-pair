@@ -1,0 +1,44 @@
+#!/bin/bash
+# Pairing link for the T3 Code server of this container, for other devices.
+# `t3 pair` builds the link from the container's own network interfaces, so it
+# would point at the Docker bridge IP (172.x) that only the host reaches. This
+# keeps its token and swaps in T3_PUBLIC_URL (e.g. a reverse proxy with TLS)
+# or T3_PUBLIC_HOST.
+#
+#   docker compose exec <service> t3-pair [--ttl 15m] [--label phone]
+set -euo pipefail
+
+# The server state lives in the agent user's ~/.t3, not root's
+if [ "$(id -u)" = 0 ]; then
+    exec agent-run "$0" "$@"
+fi
+
+out=$(t3 pair "$@")
+
+if [ -n "${T3_PUBLIC_URL:-}" ]; then
+    base="${T3_PUBLIC_URL%/}"
+elif [ -n "${T3_PUBLIC_HOST:-}" ]; then
+    base="http://${T3_PUBLIC_HOST}:${T3_PUBLIC_PORT:-${T3_PORT:-3773}}"
+else
+    printf '%s\n\n' "${out}"
+    echo "Note: set T3_PUBLIC_URL or T3_PUBLIC_HOST (LAN IP or host name of the Docker host) to get a link other devices can open."
+    exit 0
+fi
+
+token=$(sed -n 's/^Token: //p' <<< "${out}")
+expires=$(sed -n 's/^Expires: //p' <<< "${out}")
+if [ -z "${token}" ]; then
+    printf '%s\n' "${out}" >&2
+    echo "t3-pair: no token in the output of \`t3 pair\`" >&2
+    exit 1
+fi
+
+url="${base}/pair#token=${token}"
+app_link="t3code://pair?pairingUrl=$(jq -rn --arg u "${url}" '$u | @uri')"
+
+qrencode -t ANSIUTF8 -m 2 "${url}"
+echo
+echo "Pairing URL: ${url}"
+echo "App link: ${app_link}"
+echo "Token: ${token}"
+echo "Expires: ${expires}"

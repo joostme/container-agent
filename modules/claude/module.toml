@@ -1,0 +1,5 @@
+#:schema ../../schema/module.schema.json
+description = "Claude Code CLI; log in once with `agent-run claude` and /login"
+
+[env.CLAUDE_CONFIG_DIR]
+description = "Directory of the Claude config and login. Unset: ~/.claude plus ~/.claude.json."

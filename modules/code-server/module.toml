@@ -1,0 +1,21 @@
+#:schema ../../schema/module.schema.json
+description = "VS Code in the browser (code-server), opens the workspace"
+
+[env.CODE_SERVER_PORT]
+default = "8080"
+port = "http"
+
+[env.CODE_SERVER_PASSWORD]
+description = "Login password. Empty turns auth off, so keep the port private then."
+secret = true
+
+[daemons.code-server]
+run = '''
+auth=none
+[ -n "${CODE_SERVER_PASSWORD:-}" ] && auth=password
+PASSWORD="${CODE_SERVER_PASSWORD:-}" exec code-server \
+    --bind-addr "0.0.0.0:${CODE_SERVER_PORT}" --auth "${auth}" \
+    --disable-telemetry --disable-update-check "${AGENT_WORKSPACE}"
+'''
+retry = true
+ready_cmd = 'curl -sf -o /dev/null "http://127.0.0.1:${CODE_SERVER_PORT}/healthz"'

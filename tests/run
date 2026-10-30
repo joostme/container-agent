@@ -1,0 +1,97 @@
+#!/bin/bash
+# Tests of module resolution and the generated pitchfork config. They run
+# `container-agent plan` and `modules`, which need no root and no container.
+# shellcheck disable=SC2015  # `check && pass || fail` is safe, pass never fails
+set -uo pipefail
+cd "$(dirname "$0")/.." || exit 1
+
+CA="${PWD}/image/container-agent"
+MODULES="${PWD}/modules"
+FIXTURES="${PWD}/tests/fixtures"
+failures=0
+
+# Clean environment, so variables of the calling shell do not leak in
+plan() {
+    env -i PATH="${PATH}" HOME="${HOME}" CONTAINER_AGENT_MODULE_PATH="${MODULE_PATH:-${MODULES}}" \
+        "$@" "${CA}" plan 2>&1
+}
+
+pass() { echo "ok   $1"; }
+fail() {
+    echo "FAIL $1"
+    [ -z "${2:-}" ] || while IFS= read -r line; do echo "     ${line}"; done <<< "$2"
+    failures=$((failures + 1))
+}
+
+expect_order() {  # name, modules, expected order
+    local out order
+    out=$(plan AGENT_MODULES="$2")
+    order=$(sed -n '/^# Modules/,/^$/p' <<< "${out}" | awk 'NR > 1 && NF { print $1 }' | paste -sd' ')
+    [ "${order}" = "$3" ] && pass "$1" || fail "$1" "expected: $3"$'\n'"got:      ${order}"$'\n'"${out}"
+}
+
+expect_error() {  # name, pattern, env...
+    local name=$1 pattern=$2 out
+    shift 2
+    if out=$(plan "$@"); then
+        fail "${name}" "expected an error matching '${pattern}'"$'\n'"${out}"
+    elif grep -q "${pattern}" <<< "${out}"; then
+        pass "${name}"
+    else
+        fail "${name}" "error does not match '${pattern}'"$'\n'"${out}"
+    fi
+}
+
+expect_line() {  # name, line, env...
+    local name=$1 line=$2 out
+    shift 2
+    out=$(plan "$@")
+    grep -Fxq -- "${line}" <<< "${out}" && pass "${name}" || fail "${name}" "missing line: ${line}"$'\n'"${out}"
+}
+
+expect_order "requires pulls in claude, after puts it before t3" \
+    "t3,claude-remote" "claude t3 claude-remote"
+expect_order "after only orders enabled modules" \
+    "t3,codex,code-server" "codex t3 code-server"
+expect_order "duplicates and spaces are fine" \
+    "gh, gh code-server" "gh code-server"
+expect_order "no modules" "" ""
+
+expect_error "unknown module" "unknown module 'nope'" AGENT_MODULES=nope
+expect_error "required variable" "OPENCODE_SERVER_PASSWORD is required" AGENT_MODULES=opencode
+MODULE_PATH="${FIXTURES}:${MODULES}" expect_error "cycle" "depends on itself" AGENT_MODULES=cycle-a
+
+expect_line "default fills an unset variable" "T3_PORT=3773" AGENT_MODULES=t3
+expect_line "default fills an empty variable" "T3_PORT=3773" AGENT_MODULES=t3 T3_PORT=
+expect_line "set variable wins over the default" "T3_PORT=4000" AGENT_MODULES=t3 T3_PORT=4000
+expect_line "daemon starts on boot by default" "boot_start = true" AGENT_MODULES=t3
+expect_line "daemon runs in the workspace by default" 'dir = "/work"' AGENT_MODULES=t3 AGENT_WORKSPACE=/work
+
+out=$(MODULE_PATH="${FIXTURES}:${MODULES}" plan AGENT_MODULES=gh)
+grep -q "^gh  *${FIXTURES}/gh$" <<< "${out}" \
+    && pass "user module replaces built-in" || fail "user module replaces built-in" "${out}"
+
+out=$(env CONTAINER_AGENT_MODULE_PATH="${MODULES}" "${CA}" modules 2>&1)
+[ "$(wc -l <<< "${out}")" -eq "$(find "${MODULES}" -name module.toml | wc -l)" ] && ! grep -q WARN <<< "${out}" \
+    && pass "modules lists every module" || fail "modules lists every module" "${out}"
+
+# pitchfork must accept the generated config with all daemons of all modules
+all=$(cd "${MODULES}" && printf '%s\n' */module.toml | cut -d/ -f1 | paste -sd,)
+tmp=$(mktemp -d)
+mkdir -p "${tmp}/.config/pitchfork"
+plan AGENT_MODULES="${all}" OPENCODE_SERVER_PASSWORD=x \
+    | sed -n '/^# \/etc\/pitchfork\/config.toml/,$p' > "${tmp}/.config/pitchfork/config.toml"
+daemons=$(cd "${tmp}" && HOME="${tmp}" pitchfork daemons 2>&1)
+expected=$(yq -p toml -o yaml '.daemons | keys | .[]' "${tmp}/.config/pitchfork/config.toml" | sort)
+got=$(grep -oE 'global/[a-z0-9-]+' <<< "${daemons}" | sed 's|global/||' | sort -u)
+[ -n "${expected}" ] && [ "${expected}" = "${got}" ] \
+    && pass "pitchfork accepts the config of all modules" \
+    || fail "pitchfork accepts the config of all modules" "expected: ${expected}"$'\n'"${daemons}"
+rm -rf "${tmp}"
+
+echo
+if [ "${failures}" -gt 0 ]; then
+    echo "${failures} failed"
+    exit 1
+fi
+echo "all passed"

@@ -1,0 +1,12 @@
+#:schema ../../schema/module.schema.json
+description = "SSH server for the agent user (key login only), e.g. for Remote-SSH from VS Code or Cursor"
+
+[env.SSH_PORT]
+default = "22"
+port = "tcp"
+
+[daemons.sshd]
+run = "exec /usr/sbin/sshd -D -e"
+user = "root"
+mise = false
+retry = true

@@ -1,0 +1,17 @@
+#:schema ../../schema/module.schema.json
+description = "OpenCode server with its web UI"
+
+[env.OPENCODE_PORT]
+default = "4096"
+port = "http"
+
+[env.OPENCODE_SERVER_PASSWORD]
+description = "Password of the web UI and API; the user name is always opencode"
+required = true
+secret = true
+
+[daemons.opencode]
+run = 'exec opencode serve --port "$OPENCODE_PORT" --hostname 0.0.0.0'
+retry = true
+# /api/info answers once the server is ready (OpenCode 2)
+ready_cmd = 'curl -sf -o /dev/null -u "opencode:$OPENCODE_SERVER_PASSWORD" "http://127.0.0.1:$OPENCODE_PORT/api/info"'

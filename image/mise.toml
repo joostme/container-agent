@@ -1,0 +1,8 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+# System mise config of container-agent (/etc/mise/config.toml). The enabled
+# modules add theirs in /etc/mise/conf.d/; your own config in
+# ~/.config/mise/config.toml overrides both.
+
+[tools]
+# Most agents ship as npm packages
+node = "lts"

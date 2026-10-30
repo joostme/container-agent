@@ -1,0 +1,2 @@
+#:schema ../../schema/module.schema.json
+description = "OpenAI Codex CLI, e.g. as a provider in T3 Code; log in with `agent-run codex login`"

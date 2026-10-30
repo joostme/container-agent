@@ -1,0 +1,2 @@
+#:schema ../../schema/module.schema.json
+description = "GitHub CLI (gh); uses GH_TOKEN or GITHUB_TOKEN if set"

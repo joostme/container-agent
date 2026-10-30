@@ -1,0 +1,16 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+[tools]
+"github:coder/code-server" = "latest"
+
+# zsh as the default terminal. Not fatal: a settings.json with comments is no
+# valid JSON for jq.
+[bootstrap.hooks.post-tools]
+run = '''
+f="$HOME/.local/share/code-server/User/settings.json"
+mkdir -p "$(dirname "$f")"
+[ -s "$f" ] || echo '{}' > "$f"
+jq '."terminal.integrated.defaultProfile.linux" = "zsh"
+    | ."terminal.integrated.profiles.linux".zsh = {"path": "/bin/zsh"}' "$f" > "$f.tmp" \
+    && mv "$f.tmp" "$f" \
+    || { rm -f "$f.tmp"; echo "code-server: could not update $f, leaving it as is"; }
+'''

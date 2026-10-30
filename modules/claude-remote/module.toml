@@ -1,0 +1,27 @@
+#:schema ../../schema/module.schema.json
+description = "Claude Code Remote Control: sessions in claude.ai/code and the Claude apps"
+requires = ["claude"]
+
+[env.CLAUDE_REMOTE_NAME]
+description = "Name in the session list of claude.ai/code and the apps"
+default = "container-agent"
+
+[env.CLAUDE_REMOTE_SPAWN]
+description = "Where new sessions run: same-dir or worktree"
+default = "same-dir"
+
+[env.CLAUDE_REMOTE_PERMISSION_MODE]
+description = "Permission mode of new sessions, e.g. auto, default, acceptEdits, plan"
+default = "auto"
+
+# Remote Control needs a claude.ai login and exits right away without one.
+# pitchfork restarts without a delay, so wait here before the next try.
+[daemons.claude-remote]
+run = '''
+claude remote-control --name "$CLAUDE_REMOTE_NAME" --spawn "$CLAUDE_REMOTE_SPAWN" \
+    --permission-mode "$CLAUDE_REMOTE_PERMISSION_MODE" \
+    || { echo "claude remote-control exited, logged in? Retrying in 30s"; sleep 30; exit 1; }
+'''
+retry = true
+# its status view redraws all the time; keep the log small
+line_retention = 2000

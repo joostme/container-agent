@@ -1,0 +1,34 @@
+#!/bin/bash
+# Copies the daemon definitions of the pitchfork version in the Dockerfile
+# into schema/module.schema.json and makes them strict, so editors flag
+# unknown daemon options. The hand-written definitions (lower-case names)
+# stay; the pitchfork ones (upper-case names) are replaced.
+#
+#   scripts/build-schema           update the schema
+#   scripts/build-schema --check   fail if it is out of date
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+version=$(sed -n 's/^ARG PITCHFORK_VERSION=//p' Dockerfile)
+schema=schema/module.schema.json
+url="https://raw.githubusercontent.com/jdx/pitchfork/v${version}/docs/public/schema.json"
+
+tmp=$(mktemp)
+trap 'rm -f "${tmp}" "${tmp}.pf"' EXIT
+curl -fsSL "${url}" -o "${tmp}.pf"
+
+jq --slurpfile pf "${tmp}.pf" --arg version "${version}" '
+    .["$defs"] |= (with_entries(select(.key | test("^[a-z]"))) + $pf[0]["$defs"])
+    | .["$defs"].PitchforkTomlDaemon.additionalProperties = false
+    | .properties.daemons.description =
+        "Long-running processes in pitchfork \($version) syntax (https://pitchfork.jdx.dev). They run as the agent user with the mise environment, start on boot and in the workspace unless `boot_start` or `dir` say otherwise."
+    | .properties.daemons.additionalProperties = {"$ref": "#/$defs/PitchforkTomlDaemon"}
+' "${schema}" > "${tmp}"
+
+if [ "${1:-}" = --check ]; then
+    diff -u "${schema}" "${tmp}" > /dev/null \
+        || { echo "${schema} is out of date, run scripts/build-schema" >&2; exit 1; }
+else
+    cp "${tmp}" "${schema}"
+    echo "${schema}: pitchfork ${version}"
+fi

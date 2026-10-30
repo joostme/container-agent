@@ -1,0 +1,106 @@
+name: Image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v3
+      - run: mise run lint
+      - run: mise run test
+
+  # Starts the image with modules that need no login and waits until the
+  # container reports healthy, i.e. setup ran and all daemons are up
+  smoke:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: container-agent:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Start container
+        run: |
+          docker run -d --name smoke \
+            -e AGENT_MODULES=code-server,sshd,oh-my-zsh,gh,t3 \
+            -e CODE_SERVER_PASSWORD=smoke \
+            container-agent:smoke
+      - name: Wait for healthy
+        run: |
+          for _ in $(seq 1 120); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' smoke 2>/dev/null || echo gone)
+            echo "health: ${status}"
+            case "${status}" in
+              healthy) exit 0 ;;
+              unhealthy|gone) break ;;
+            esac
+            sleep 10
+          done
+          exit 1
+      - name: Check daemons and tools
+        run: |
+          docker exec smoke agent-run pitchfork list
+          docker exec smoke agent-run sh -c 'command -v code-server gh t3 && test -d ~/.oh-my-zsh'
+          docker exec smoke agent-run sh -c 'curl -sf -o /dev/null http://127.0.0.1:8080/healthz'
+          docker exec smoke sh -c 'command -v qrencode t3-pair'
+      - name: Logs
+        if: always()
+        run: |
+          docker logs smoke || true
+          docker exec smoke agent-run pitchfork logs -n 100 || true
+
+  publish:
+    needs: smoke
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

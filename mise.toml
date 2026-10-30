@@ -1,0 +1,22 @@
+# Development tools for this repository (not part of the image)
+[tools]
+pitchfork = "2.32.3"
+yq = "4.54.1"
+taplo = "latest"
+shellcheck = "latest"
+
+[tasks.lint]
+description = "Check the shell scripts, the TOML files against their schemas and that the module schema is current"
+run = [
+    "shellcheck image/container-agent image/agent-run modules/*/bin/* scripts/* tests/run",
+    "taplo lint image/mise.toml modules/*/*.toml",
+    "scripts/build-schema --check",
+]
+
+[tasks.test]
+description = "Test module resolution and the generated pitchfork config"
+run = "tests/run"
+
+[tasks.schema]
+description = "Update the pitchfork part of schema/module.schema.json to the version in the Dockerfile"
+run = "scripts/build-schema"

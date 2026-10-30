@@ -1,0 +1,1938 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/joostme/container-agent/main/schema/module.schema.json",
+  "title": "container-agent module",
+  "description": "module.toml of a container-agent module: what the module needs and which processes it runs. Tools, apt packages and setup hooks live in the mise.toml next to it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "description"
+  ],
+  "properties": {
+    "description": {
+      "description": "One line about what the module does. Shown by `container-agent modules` and in the configurator.",
+      "type": "string",
+      "minLength": 1
+    },
+    "requires": {
+      "description": "Modules this module cannot work without. They are enabled automatically and set up first.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/moduleName"
+      },
+      "uniqueItems": true
+    },
+    "after": {
+      "description": "Modules to set up and start before this one, but only if they are enabled too. Use it for optional companions, e.g. the agents a UI drives.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/moduleName"
+      },
+      "uniqueItems": true
+    },
+    "arch": {
+      "description": "CPU architectures the module works on. Omit it if the module works on all of them.",
+      "type": "array",
+      "items": {
+        "enum": [
+          "amd64",
+          "arm64"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "env": {
+      "description": "Environment variables the module reads. Keys are variable names.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Z][A-Z0-9_]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/envVar"
+      }
+    },
+    "daemons": {
+      "description": "Long-running processes in pitchfork 2.32.3 syntax (https://pitchfork.jdx.dev). They run as the agent user with the mise environment, start on boot and in the workspace unless `boot_start` or `dir` say otherwise.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/moduleName"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/PitchforkTomlDaemon"
+      }
+    }
+  },
+  "$defs": {
+    "moduleName": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "envVar": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "description": "What the variable does.",
+          "type": "string"
+        },
+        "default": {
+          "description": "Value used when the variable is not set in the container environment.",
+          "type": "string"
+        },
+        "required": {
+          "description": "The container refuses to start when the variable is empty.",
+          "type": "boolean",
+          "default": false
+        },
+        "secret": {
+          "description": "The value is a password or token. Configurators keep it out of compose.yaml and in .env.",
+          "type": "boolean",
+          "default": false
+        },
+        "port": {
+          "description": "The variable holds a port the module listens on, and which protocol it speaks.",
+          "enum": [
+            "http",
+            "tcp"
+          ]
+        }
+      }
+    },
+    "CpuLimit": {
+      "description": "CPU usage limit as a percentage (e.g. 80 for 80% of one core, 200 for 2 cores)",
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "CronRetrigger": {
+      "description": "Retrigger behavior for cron-scheduled daemons",
+      "oneOf": [
+        {
+          "description": "Retrigger only if the previous run has finished (success or error)",
+          "type": "string",
+          "const": "finish"
+        },
+        {
+          "description": "Always retrigger, stopping the previous run if still active",
+          "type": "string",
+          "const": "always"
+        },
+        {
+          "description": "Retrigger only if the previous run succeeded",
+          "type": "string",
+          "const": "success"
+        },
+        {
+          "description": "Retrigger only if the previous run failed",
+          "type": "string",
+          "const": "fail"
+        }
+      ]
+    },
+    "DaemonId": {
+      "description": "Daemon name (e.g. 'api') or qualified ID ('namespace/name') for cross-namespace references",
+      "type": "string",
+      "not": {
+        "pattern": "\\.\\.|--|(^|/)-|-($|/)|^\\.$|^\\./|/\\.$"
+      },
+      "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?$"
+    },
+    "GroupEntryRaw": {
+      "description": "Raw group entry as read from TOML.\n```toml\n[groups.backend]\ndaemons = [\"api\", \"worker\"]\n\n[groups.all]\ngroups = [\"backend\"]\ndaemons = [\"postgres\"]\n```",
+      "type": "object",
+      "properties": {
+        "daemons": {
+          "description": "Daemons in this group: short names or fully qualified IDs.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DaemonId"
+          }
+        },
+        "groups": {
+          "description": "Names of other groups whose daemons this group also contains.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "HealthCmd": {
+      "description": "Command health check: a shell command string, a program and its arguments to run without a shell, or { run, interval, timeout, retries } object with periodic probing",
+      "oneOf": [
+        {
+          "description": "Shell command that returns exit code 0 when healthy",
+          "type": "string"
+        },
+        {
+          "description": "Program and its arguments, run without a shell, that returns exit code 0 when healthy. The program comes first, and is neither empty nor \"exec\".",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "prefixItems": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "not": {
+                "const": "exec"
+              }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "interval": {
+              "description": "Time between health probes (e.g. '10s', '5m'). Omit to use the `supervisor.health_check_interval` setting (default 10s).",
+              "type": "string"
+            },
+            "retries": {
+              "description": "Consecutive failed probes before the daemon is killed. Omit to use the `supervisor.health_check_retries` setting (default 3).",
+              "type": "integer",
+              "minimum": 1
+            },
+            "run": {
+              "description": "Command that returns exit code 0 when healthy: a shell command string, or a program and its arguments to run without a shell",
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "prefixItems": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "not": {
+                        "const": "exec"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "timeout": {
+              "description": "Per-probe timeout (e.g. '10s', '5m'). Omit to use the `supervisor.health_cmd_timeout` setting (default 10s).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "run"
+          ]
+        }
+      ]
+    },
+    "HealthHttp": {
+      "description": "HTTP health check: a URL string accepting any 2xx response, or { url, status, interval, timeout, retries } object with periodic probing",
+      "oneOf": [
+        {
+          "description": "HTTP URL to poll for health; any 2xx response is healthy",
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "interval": {
+              "description": "Time between health probes (e.g. '10s', '5m'). Omit to use the `supervisor.health_check_interval` setting (default 10s).",
+              "type": "string"
+            },
+            "retries": {
+              "description": "Consecutive failed probes before the daemon is killed. Omit to use the `supervisor.health_check_retries` setting (default 3).",
+              "type": "integer",
+              "minimum": 1
+            },
+            "status": {
+              "description": "Exact HTTP status codes that indicate health. Omit to accept any 2xx response.",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "maximum": 599,
+                "minimum": 100
+              }
+            },
+            "timeout": {
+              "description": "Per-request timeout (e.g. '5s', '30s'). Omit to use the `supervisor.health_http_timeout` setting (default 5s).",
+              "type": "string"
+            },
+            "url": {
+              "description": "HTTP URL to poll for health",
+              "type": "string"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      ]
+    },
+    "HealthPort": {
+      "description": "TCP port health check: a port number, a template string rendering to one, or a { port, interval, retries, timeout } object with periodic probing",
+      "oneOf": [
+        {
+          "description": "TCP port number to probe for health",
+          "type": "integer",
+          "maximum": 65535,
+          "minimum": 1
+        },
+        {
+          "description": "Tera template that renders to a port number",
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "interval": {
+              "description": "Time between health probes (e.g. '10s', '5m'). Omit to use the `supervisor.health_check_interval` setting (default 10s).",
+              "type": "string"
+            },
+            "port": {
+              "description": "TCP port number to probe for health",
+              "type": "integer",
+              "maximum": 65535,
+              "minimum": 1
+            },
+            "retries": {
+              "description": "Consecutive failed probes before the daemon is killed. Omit to use the `supervisor.health_check_retries` setting (default 3).",
+              "type": "integer",
+              "minimum": 1
+            },
+            "template": {
+              "description": "Tera template that renders to a port number",
+              "type": "string"
+            },
+            "timeout": {
+              "description": "Per-connect timeout (e.g. '5s', '30s'). Omit to use the `supervisor.health_port_timeout` setting (default 5s).",
+              "type": "string"
+            }
+          },
+          "oneOf": [
+            {
+              "required": [
+                "port"
+              ]
+            },
+            {
+              "required": [
+                "template"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "MemoryLimit": {
+      "description": "A byte size, as either a human-readable string (e.g. \"1.5 KiB\") or a number of bytes",
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "NamespaceEntryRaw": {
+      "description": "Raw namespace entry as read from TOML.\n```toml\n[namespaces.myproject]\ndir = \"/home/user/projects/myproject\"\n```",
+      "type": "object",
+      "properties": {
+        "config": {
+          "description": "Additional configuration files, relative to dir or absolute.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dir": {
+          "description": "Project directory containing the pitchfork.toml",
+          "type": "string"
+        },
+        "label": {
+          "description": "Hostname label for the project, used instead of the namespace when the\nnamespace is only an identifier (for example a generated\n`shop-528f92b13a6784f0`). Must already be a valid DNS label.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "dir"
+      ]
+    },
+    "OnOutputHook": {
+      "description": "Output hook configuration.\n\nAccepts two forms:\n```toml\non_output = \"echo matched\"                              # shorthand (run only)\non_output = { run = \"echo matched\", filter = \"ready\" }  # full\n```\n\nPattern matching (`filter` / `regex`) is performed against ANSI-stripped\noutput and covers both stdout and stderr.",
+      "type": "object",
+      "properties": {
+        "debounce": {
+          "description": "Minimum time between successive firings (humantime, e.g. `\"500ms\"`).\nDefaults to `\"1000ms\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "filter": {
+          "description": "Fire when a line of output contains this substring",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "regex": {
+          "description": "Fire when a line of output matches this regular expression",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run": {
+          "description": "Command to run when the output condition is met",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run"
+      ]
+    },
+    "PitchforkTomlAuto": {
+      "description": "Auto start/stop configuration",
+      "type": "string",
+      "enum": [
+        "start",
+        "stop"
+      ]
+    },
+    "PitchforkTomlCron": {
+      "description": "Cron scheduling: a cron expression string, or { schedule, retrigger, immediate } object",
+      "oneOf": [
+        {
+          "description": "Cron expression (e.g. '0 * * * *')",
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "immediate": {
+              "description": "Trigger immediately on first check (default: false)",
+              "type": "boolean"
+            },
+            "retrigger": {
+              "$ref": "#/$defs/CronRetrigger"
+            },
+            "schedule": {
+              "description": "Cron expression",
+              "type": "string"
+            }
+          },
+          "required": [
+            "schedule"
+          ]
+        }
+      ]
+    },
+    "PitchforkTomlDaemon": {
+      "description": "Configuration for a single daemon (internal representation with DaemonId)",
+      "type": "object",
+      "properties": {
+        "archive_hook": {
+          "description": "Archive hook command invoked before retention prunes this daemon's logs.\nOverrides the global `settings.logs.archive_hook.command` when set.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "auto": {
+          "description": "Automatic start/stop behavior based on shell hooks",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PitchforkTomlAuto"
+          }
+        },
+        "boot_start": {
+          "description": "Whether to start this daemon automatically on system boot",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "cpu_limit": {
+          "description": "CPU usage limit as a percentage (e.g. 80 for 80%, 200 for 2 cores).\nThe supervisor periodically monitors CPU usage and kills the process if it exceeds the limit.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CpuLimit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cron": {
+          "description": "Cron scheduling configuration for periodic execution",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PitchforkTomlCron"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "depends": {
+          "description": "List of daemon IDs that must be started before this one",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DaemonId"
+          }
+        },
+        "dir": {
+          "description": "Working directory for the daemon. Relative paths are resolved from the pitchfork.toml location.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env": {
+          "description": "Environment variables to set for the daemon process",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "env_file": {
+          "description": "Dotenv files (e.g. `.env.local`) whose variables are added to the daemon's\nenvironment. Relative paths resolve from the project directory (the same base as\n`dir`); missing files are skipped. Values from `env` win over the files, and later files win\nover earlier ones. Values support Tera templates.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "health_cmd": {
+          "description": "Shell command to poll for health (exit code 0 = healthy)",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HealthCmd"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "health_http": {
+          "description": "HTTP endpoint URL to poll for health",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HealthHttp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "health_port": {
+          "description": "TCP port to probe for health (connection success = healthy).\nAccepts a port number, a Tera template string that renders to one, or an\nobject with optional per-check `interval`, `retries`, and `timeout`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HealthPort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hooks": {
+          "description": "Lifecycle hooks (on_ready, on_fail, on_retry)",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PitchforkTomlHooks"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "line_retention": {
+          "description": "Maximum number of log entries to keep per daemon.\nOverrides the global `settings.logs.line_retention` when set.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "logs": {
+          "description": "Per-daemon log configuration sub-table.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PitchforkTomlDaemonLogs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "memory_limit": {
+          "description": "Memory limit for the daemon process (e.g. \"50MB\", \"1GiB\").\nThe supervisor periodically monitors RSS and kills the process if it exceeds the limit.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryLimit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mise": {
+          "description": "Wrap this daemon's command with `mise x --` for tool/env setup.\nOverrides the global `settings.general.mise` when set.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "oneshot": {
+          "description": "Run this daemon as a task that must finish rather than a long-running\nservice. Readiness means the process exited with code 0, the daemon\nthen reports the `completed` status, and daemons that `depends` on it\nwait for that completion. Cannot be combined with any `ready_*` or\n`health_*` field.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "port": {
+          "description": "Port configuration: expected ports and auto-bump settings",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PortConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proxy": {
+          "description": "Proxy routing: `false` opts out of the automatic hostname, a string\noverrides the daemon label used in it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProxyConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proxy_idle_timeout": {
+          "description": "Idle timeout when the proxy auto-starts this daemon, for example `\"15m\"`.\nAccepts a duration string or `false`; `\"0\"` also disables idle shutdown.\n\nWhen omitted, a daemon started through its URL uses\n`settings.proxy.idle_timeout`; a dependency inherits the requested\ndaemon's timeout. An explicit `false` exempts this daemon in either case.\n\nThe timeout is recorded at startup. Explicitly started daemons are\nexempt; live dependents, active proxy connections, and tracked shell\nsessions prevent idle shutdown.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProxyIdleTimeout"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proxy_port": {
+          "description": "Shorter spelling of `proxy_tls_port`. Set one or the other, not both.\n\nKept separate rather than folded so that a config keeps the spelling\nits author chose when pitchfork rewrites it. Read\n[`Self::effective_proxy_tls_port`] rather than either field.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 1
+        },
+        "proxy_protocol": {
+          "description": "HTTP version the proxy speaks to this daemon.\n\n- `http1` (default): requests are forwarded as HTTP/1.1.\n- `h2c`: requests are forwarded as cleartext HTTP/2 with prior\n  knowledge, which gRPC servers require. Clients can still reach the\n  proxy over HTTP/1.1 or HTTP/2; this only changes the hop to the\n  daemon. WebSocket upgrades are not available on an `h2c` daemon.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProxyProtocol"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proxy_tls": {
+          "description": "TLS handling for this daemon's proxy hostname.\n\n- `terminate` (default): the proxy terminates TLS with its own\n  certificate and forwards plain HTTP to the daemon.\n- `passthrough`: the proxy reads the SNI hostname from the TLS\n  ClientHello and splices the raw TCP stream to the daemon, which\n  presents its own certificate and can require client certificates.\n  Requires `port`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProxyTlsMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proxy_tls_port": {
+          "description": "Which of the daemon's ports the proxy hostname maps to.\n\nMust name one of the ports in `port`. Defaults to the daemon's first\nport. `proxy_port` is the shorter spelling of the same setting.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 1
+        },
+        "pty": {
+          "description": "Allocate a pseudo-terminal for the daemon process.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "ready_cmd": {
+          "description": "Shell command to poll for readiness (exit code 0 = ready)",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReadyCmd"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ready_delay": {
+          "description": "Delay in seconds before considering the daemon ready",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "ready_http": {
+          "description": "HTTP URL to poll for readiness. Accepts any 2xx response by default, or configured statuses.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReadyHttp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ready_output": {
+          "description": "Regex pattern to match in ANSI-stripped stdout/stderr to determine readiness",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReadyOutput"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ready_port": {
+          "description": "TCP port to check for readiness (connection success = ready).\nAccepts a port number, a Tera template string that renders to one, or an\nobject with an optional overall polling timeout.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReadyPort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retry": {
+          "description": "Number of times to retry if the daemon fails.\nCan be a number (e.g., `3`) or `true` for infinite retries.",
+          "$ref": "#/$defs/Retry",
+          "default": 0
+        },
+        "run": {
+          "description": "The command to run: a command line for the shell, or an array of a\nprogram and its arguments to start without a shell. In the string\nform, prepend 'exec' to avoid shell process overhead.",
+          "$ref": "#/$defs/RunCommand",
+          "examples": [
+            "exec node server.js"
+          ]
+        },
+        "stop_signal": {
+          "description": "Stop signal and optional per-daemon timeout. Accepts a signal name string\nor `{ signal = \"...\", timeout = \"...\" }` object.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "time_retention": {
+          "description": "Maximum age of log entries to keep (e.g. \"7d\", \"30d\").\nOverrides the global `settings.logs.time_retention` when set.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user": {
+          "description": "Unix user to run this daemon as. Overrides `settings.supervisor.user` when set.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "watch": {
+          "description": "File patterns to watch for changes",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "watch_mode": {
+          "description": "File watching backend mode.\n\n- `native`: use platform-native notifications (default)\n- `poll`: use polling-based watcher\n- `auto`: prefer native, fall back to polling if native watch fails",
+          "$ref": "#/$defs/WatchMode",
+          "default": "native"
+        }
+      },
+      "required": [
+        "run"
+      ],
+      "additionalProperties": false
+    },
+    "PitchforkTomlDaemonLogs": {
+      "description": "Per-daemon log configuration sub-table `[daemons.<name>.logs]`.\n\nFields here override the top-level daemon fields (`time_retention`,\n`line_retention`, `archive_hook`) and the global `[settings.logs]` defaults.",
+      "type": "object",
+      "properties": {
+        "archive_hook": {
+          "description": "Archive hook command invoked before retention prunes this daemon's logs.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "line_retention": {
+          "description": "Maximum number of log entries to keep per daemon.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "log_format": {
+          "description": "Log line format: `json`, `logfmt`, or `text`.\nDefaults to `text` (no parsing).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "time_retention": {
+          "description": "Maximum age of log entries to keep (e.g. \"7d\", \"30d\").",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "PitchforkTomlHooks": {
+      "description": "Lifecycle hooks for a daemon",
+      "type": "object",
+      "properties": {
+        "on_exit": {
+          "description": "Command to run on any daemon termination (clean exit, crash, or stop)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "on_fail": {
+          "description": "Command to run when the daemon fails and all retries are exhausted",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "on_output": {
+          "description": "Hook triggered when the daemon produces matching output",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OnOutputHook"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "on_ready": {
+          "description": "Command to run when the daemon becomes ready",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "on_retry": {
+          "description": "Command to run before each retry attempt",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "on_stop": {
+          "description": "Command to run when the daemon is explicitly stopped by pitchfork",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "PortBump": {
+      "description": "Port bump: true = unlimited, false/0 = disabled, number = max attempts",
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer",
+          "minimum": 0
+        }
+      ]
+    },
+    "PortConfig": {
+      "description": "Port config: a port number, array of ports, or { expect, bump } object",
+      "oneOf": [
+        {
+          "type": "integer",
+          "maximum": 65535,
+          "minimum": 0
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "maximum": 65535,
+            "minimum": 0
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "bump": {
+              "$ref": "#/$defs/PortBump"
+            },
+            "expect": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "maximum": 65535,
+                "minimum": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ProxyConfig": {
+      "description": "Proxy routing: false = no hostname, true = default hostname, string = daemon label override",
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "ProxyIdleTimeout": {
+      "description": "Stop a proxy-started daemon after this long without proxy activity (e.g. \"15m\"); false never stops it",
+      "oneOf": [
+        {
+          "type": "boolean",
+          "enum": [
+            false
+          ]
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "ProxyProtocol": {
+      "description": "The HTTP version the reverse proxy speaks to a daemon.",
+      "oneOf": [
+        {
+          "description": "Plain HTTP/1.1 (the historical behavior).",
+          "type": "string",
+          "const": "http1"
+        },
+        {
+          "description": "Cleartext HTTP/2 with prior knowledge, as gRPC servers expect.",
+          "type": "string",
+          "const": "h2c"
+        }
+      ]
+    },
+    "ProxyTlsMode": {
+      "description": "How the reverse proxy handles TLS for a daemon's hostname.",
+      "oneOf": [
+        {
+          "description": "The proxy terminates TLS with its own certificate and forwards plain\nHTTP to the daemon (the historical behavior).",
+          "type": "string",
+          "const": "terminate"
+        },
+        {
+          "description": "The proxy reads the SNI hostname from the TLS ClientHello and splices\nthe raw TCP stream to the daemon, which terminates TLS itself.",
+          "type": "string",
+          "const": "passthrough"
+        }
+      ]
+    },
+    "ReadyCmd": {
+      "description": "Command readiness check: a shell command string, a program and its arguments to run without a shell, or { run, timeout } object with an optional overall polling timeout",
+      "oneOf": [
+        {
+          "description": "Shell command that returns exit code 0 when ready",
+          "type": "string"
+        },
+        {
+          "description": "Program and its arguments, run without a shell, that returns exit code 0 when ready. The program comes first, and is neither empty nor \"exec\".",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "prefixItems": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "not": {
+                "const": "exec"
+              }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "run": {
+              "description": "Command that returns exit code 0 when ready: a shell command string, or a program and its arguments to run without a shell",
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "prefixItems": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "not": {
+                        "const": "exec"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "timeout": {
+              "description": "Overall readiness polling timeout (e.g. '30s', '5m')",
+              "type": "string"
+            }
+          },
+          "required": [
+            "run"
+          ]
+        }
+      ]
+    },
+    "ReadyHttp": {
+      "description": "HTTP readiness check: a URL string accepting any 2xx response, or { url, status, timeout } object with exact accepted status codes and optional overall polling timeout",
+      "oneOf": [
+        {
+          "description": "HTTP URL to poll for readiness; any 2xx response is ready",
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "description": "Exact HTTP status codes that indicate readiness. Omit to accept any 2xx response.",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "maximum": 599,
+                "minimum": 100
+              }
+            },
+            "timeout": {
+              "description": "Overall readiness polling timeout (e.g. '30s', '5m'). Distinct from per-request http_client_timeout.",
+              "type": "string"
+            },
+            "url": {
+              "description": "HTTP URL to poll for readiness",
+              "type": "string"
+            }
+          },
+          "required": [
+            "url"
+          ]
+        }
+      ]
+    },
+    "ReadyOutput": {
+      "description": "Output readiness check: a regex pattern string, or { pattern, timeout } object with an optional overall polling timeout",
+      "oneOf": [
+        {
+          "description": "Regex pattern matched against ANSI-stripped stdout/stderr lines",
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "description": "Regex pattern matched against ANSI-stripped stdout/stderr lines",
+              "type": "string"
+            },
+            "timeout": {
+              "description": "Overall readiness polling timeout (e.g. '30s', '5m')",
+              "type": "string"
+            }
+          },
+          "required": [
+            "pattern"
+          ]
+        }
+      ]
+    },
+    "ReadyPort": {
+      "description": "TCP readiness port: a port number, a template string rendering to one, or an object with an optional overall polling timeout",
+      "oneOf": [
+        {
+          "description": "TCP port number to check for readiness",
+          "type": "integer",
+          "maximum": 65535,
+          "minimum": 1
+        },
+        {
+          "description": "Tera template that renders to a port number",
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "port": {
+              "description": "TCP port number to check for readiness",
+              "type": "integer",
+              "maximum": 65535,
+              "minimum": 1
+            },
+            "template": {
+              "description": "Tera template that renders to a port number",
+              "type": "string"
+            },
+            "timeout": {
+              "description": "Overall readiness polling timeout (e.g. '30s', '5m')",
+              "type": "string"
+            }
+          },
+          "oneOf": [
+            {
+              "required": [
+                "port"
+              ]
+            },
+            {
+              "required": [
+                "template"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "Retry": {
+      "description": "Retry: true = indefinite, false/0 = none, number = count",
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer",
+          "minimum": 0
+        }
+      ]
+    },
+    "RunCommand": {
+      "description": "A daemon's `run`: a command line for the shell, or a program and its\narguments to start without one.",
+      "anyOf": [
+        {
+          "description": "A command line, passed verbatim to the shell (`general.shell`, or\n`general.windows_shell` on Windows).",
+          "type": "string"
+        },
+        {
+          "description": "A program and its arguments, started directly. No shell interprets\nthem, so each argument reaches the program exactly as written, on\nevery platform.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      ]
+    },
+    "SettingsApiPartial": {
+      "description": "Partial mirror of [`SettingsApi`].",
+      "type": "object",
+      "properties": {
+        "auto_start": {
+          "description": "Automatically start the standalone API server",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "bind_address": {
+          "description": "IP address the API server binds to",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bind_port": {
+          "description": "Port the standalone API server listens on",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "port_attempts": {
+          "description": "Number of consecutive ports to try if api.bind_port is in use",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "token": {
+          "description": "Authentication token for API access when bound to non-loopback addresses",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SettingsBootPartial": {
+      "description": "Partial mirror of [`SettingsBoot`].",
+      "type": "object",
+      "properties": {
+        "executable": {
+          "description": "Absolute executable path written into boot registrations",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SettingsGeneralPartial": {
+      "description": "Partial mirror of [`SettingsGeneral`].",
+      "type": "object",
+      "properties": {
+        "autostop_delay": {
+          "description": "Delay before auto-stopping daemons when leaving a directory",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "interval": {
+          "description": "Supervisor background task refresh interval",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "log_file_level": {
+          "description": "File log level (trace, debug, info, warn, error)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "log_level": {
+          "description": "Console log level (trace, debug, info, warn, error)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mise": {
+          "description": "Wrap daemon commands with mise x -- globally",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "mise_bin": {
+          "description": "Explicit path to the mise binary",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ready_delay": {
+          "description": "Default readiness delay in seconds when a daemon has no ready check configured",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "shell": {
+          "description": "Shell command used to execute daemon run scripts",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startup_log_timestamps": {
+          "description": "Show timestamps in startup log output",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "windows_shell": {
+          "description": "Shell command used to execute daemon run scripts on Windows",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "worktree": {
+          "description": "Enable git worktree / jj workspace auto-discovery",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "SettingsIpcPartial": {
+      "description": "Partial mirror of [`SettingsIpc`].",
+      "type": "object",
+      "properties": {
+        "connect_attempts": {
+          "description": "Number of connection retry attempts",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "connect_max_delay": {
+          "description": "Maximum delay between connection retries",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "connect_min_delay": {
+          "description": "Minimum delay between connection retries",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rate_limit": {
+          "description": "Maximum IPC requests per second per connection",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "rate_limit_window": {
+          "description": "Rate limit sliding window duration",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_timeout": {
+          "description": "Default timeout for IPC requests",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SettingsLogsArchiveHookPartial": {
+      "description": "Partial mirror of [`SettingsLogsArchiveHook`].",
+      "type": "object",
+      "properties": {
+        "batch_size": {
+          "description": "Maximum log entries per archive hook invocation",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "command": {
+          "description": "Command to run before retention deletes old log entries",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SettingsLogsPartial": {
+      "description": "Partial mirror of [`SettingsLogs`].",
+      "type": "object",
+      "properties": {
+        "archive_hook": {
+          "$ref": "#/$defs/SettingsLogsArchiveHookPartial"
+        },
+        "line_retention": {
+          "description": "Count-based log retention (e.g. 10000)",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "log_format": {
+          "description": "Default log format for daemons (json | logfmt | text)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "time_retention": {
+          "description": "Time-based log retention duration (e.g. '7d', '30d')",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timestamp": {
+          "description": "Show timestamps in log output",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "timestamp_format": {
+          "description": "strftime format for log timestamps in `pitchfork logs` output",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SettingsPartial": {
+      "description": "Partial mirror of [`Settings`], for `[settings]` tables in\npitchfork.toml files.",
+      "type": "object",
+      "properties": {
+        "api": {
+          "$ref": "#/$defs/SettingsApiPartial"
+        },
+        "boot": {
+          "$ref": "#/$defs/SettingsBootPartial"
+        },
+        "general": {
+          "$ref": "#/$defs/SettingsGeneralPartial"
+        },
+        "ipc": {
+          "$ref": "#/$defs/SettingsIpcPartial"
+        },
+        "logs": {
+          "$ref": "#/$defs/SettingsLogsPartial"
+        },
+        "proxy": {
+          "$ref": "#/$defs/SettingsProxyPartial"
+        },
+        "supervisor": {
+          "$ref": "#/$defs/SettingsSupervisorPartial"
+        },
+        "tui": {
+          "$ref": "#/$defs/SettingsTuiPartial"
+        },
+        "web": {
+          "$ref": "#/$defs/SettingsWebPartial"
+        }
+      }
+    },
+    "SettingsProxyPartial": {
+      "description": "Partial mirror of [`SettingsProxy`].",
+      "type": "object",
+      "properties": {
+        "auto_start": {
+          "description": "Automatically start daemons when accessed via proxy URL",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "auto_start_timeout": {
+          "description": "Maximum time to wait for an auto-started daemon to become ready",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "auto_trust": {
+          "description": "Automatically install the proxy TLS certificate into the system trust store",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "dns": {
+          "description": "Run a loopback DNS resolver for the proxy TLD",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "dns_port": {
+          "description": "Port the loopback DNS resolver listens on",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "enable": {
+          "description": "Enable the reverse proxy server for daemons",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "host": {
+          "description": "Bind address for the reverse proxy server",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "https": {
+          "description": "Enable HTTPS for the reverse proxy",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "idle_timeout": {
+          "description": "Stop proxy-started daemons after this long without proxy activity",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lan": {
+          "description": "Enable LAN mode for the reverse proxy",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "lan_ip": {
+          "description": "Pin a specific LAN IP address instead of auto-detecting",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "description": "Port the reverse proxy server listens on",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "sync_hosts": {
+          "description": "Automatically sync slug hostnames to /etc/hosts (deprecated)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "tld": {
+          "description": "Top-level domain used for proxy URLs",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tls_cert": {
+          "description": "Path to TLS certificate file (PEM format) for HTTPS proxy",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tls_key": {
+          "description": "Path to TLS private key file (PEM format) for HTTPS proxy",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wildcard": {
+          "description": "Enable wildcard subdomain matching for proxy routes",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "worktree": {
+          "description": "Compatibility alias for general.worktree",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "SettingsSupervisorPartial": {
+      "description": "Partial mirror of [`SettingsSupervisor`].",
+      "type": "object",
+      "properties": {
+        "auto_start": {
+          "description": "Automatically start the supervisor when a client command needs it",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "cleanup_orphans": {
+          "description": "Reconcile orphaned daemon processes when supervisor starts",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "container": {
+          "description": "Enable container/PID1 mode for running inside Docker containers",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "cpu_violation_threshold": {
+          "description": "Consecutive CPU-over-limit samples before killing a daemon",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "cron_check_interval": {
+          "description": "Interval for checking cron schedules",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "file_watch_debounce": {
+          "description": "File watch debounce duration",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "health_check_interval": {
+          "description": "Default time between health probes",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "health_check_retries": {
+          "description": "Default consecutive health-check failures before killing a daemon",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "health_cmd_timeout": {
+          "description": "Default per-probe timeout for health_cmd",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "health_http_timeout": {
+          "description": "Default per-request timeout for health_http",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "health_port_timeout": {
+          "description": "Default per-connect timeout for health_port",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "http_client_timeout": {
+          "description": "Timeout for HTTP ready checks",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "log_flush_interval": {
+          "description": "Daemon log buffer flush interval",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "oneshot_timeout": {
+          "description": "Maximum time to wait for a oneshot daemon to finish",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "orphan_policy": {
+          "description": "What to do with live orphaned daemons on supervisor startup: adopt or kill",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port_bump_attempts": {
+          "description": "Maximum port increment attempts when auto_bump_port is enabled",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "ready_check_interval": {
+          "description": "Interval between ready checks (HTTP, TCP, command)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "restart_delay": {
+          "description": "Delay between stop and start during restart",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stop_timeout": {
+          "description": "Maximum time to wait for daemon to stop gracefully",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user": {
+          "description": "Default user to run daemon processes as",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "watch_interval": {
+          "description": "File watcher config refresh interval",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "watch_poll_interval": {
+          "description": "Polling watcher filesystem scan interval",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SettingsTuiPartial": {
+      "description": "Partial mirror of [`SettingsTui`].",
+      "type": "object",
+      "properties": {
+        "message_duration": {
+          "description": "Status message display duration",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "refresh_rate": {
+          "description": "Daemon list refresh interval",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stat_history": {
+          "description": "Number of stat samples to keep for graphs",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "tick_rate": {
+          "description": "Event loop tick rate",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SettingsWebPartial": {
+      "description": "Partial mirror of [`SettingsWeb`].",
+      "type": "object",
+      "properties": {
+        "auto_start": {
+          "description": "Automatically start web UI when supervisor starts",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "base_path": {
+          "description": "URL path prefix for the web UI (e.g. \"ps\" serves at /ps/)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bind_address": {
+          "description": "Web server bind address",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bind_port": {
+          "description": "Default web server port",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "log_lines": {
+          "description": "Initial number of log lines to display",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "port_attempts": {
+          "description": "Number of ports to try if default is in use",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
+        "sse_poll_interval": {
+          "description": "Server-Sent Events poll interval for log streaming",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SlugEntryRaw": {
+      "description": "Raw slug entry as read from TOML (uses String for dir path).\nFormat in global config:\n```toml\n[slugs]\napi = { dir = \"/home/user/my-api\", daemon = \"server\" }\ndocs = { dir = \"/home/user/docs-site\" }  # daemon defaults to slug name\n```",
+      "type": "object",
+      "properties": {
+        "daemon": {
+          "description": "Daemon name within that project (defaults to slug name if omitted)",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dir": {
+          "description": "Project directory containing the pitchfork.toml",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "namespace": {
+          "description": "Namespace reference (alternative to dir)",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "StopConfig": {
+      "description": "Stop signal config: a signal name string, or { signal, timeout } object",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/StopSignal"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "signal": {
+              "$ref": "#/$defs/StopSignal"
+            },
+            "timeout": {
+              "description": "Graceful shutdown timeout (e.g. '500ms', '3s')",
+              "type": "string"
+            }
+          },
+          "required": [
+            "signal"
+          ]
+        }
+      ]
+    },
+    "StopSignal": {
+      "description": "Unix signal for graceful shutdown (e.g. 'SIGTERM', 'SIGINT', 'SIGHUP')",
+      "type": "string",
+      "enum": [
+        "SIGTERM",
+        "SIGINT",
+        "SIGQUIT",
+        "SIGHUP",
+        "SIGUSR1",
+        "SIGUSR2"
+      ]
+    },
+    "WatchMode": {
+      "description": "File watch backend mode for daemon `watch` patterns.",
+      "oneOf": [
+        {
+          "description": "Use platform-native watcher backend (inotify/FSEvents/ReadDirectoryChangesW).",
+          "type": "string",
+          "const": "native"
+        },
+        {
+          "description": "Use polling backend; more compatible on networked filesystems.",
+          "type": "string",
+          "const": "poll"
+        },
+        {
+          "description": "Prefer native backend, fall back to polling when native watch setup fails.",
+          "type": "string",
+          "const": "auto"
+        }
+      ]
+    }
+  }
+}
