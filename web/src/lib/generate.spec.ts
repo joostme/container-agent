@@ -90,8 +90,33 @@ describe('share', () => {
 		expect(decodeHash(`#${hash}`, registry)?.values).toEqual({ T3_PUBLIC_URL: 'https://t3.example.org' });
 	});
 
+	it('reads every setting from the compose file itself', () => {
+		const full = config({
+			modules: ['t3', 'gh'],
+			values: { T3_PUBLIC_URL: 'https://t3.example.org', GH_TOKEN: 'secret' },
+			service: 'dev',
+			imageTag: '0.2.0',
+			pgid: '100',
+			tz: 'Europe/Berlin',
+			agentUser: 'me',
+			dataDir: '/mnt/agent',
+			sshKeys: '~/.ssh',
+			autoUpdate: false
+		});
+		const out = generate(full, registry).compose;
+		expect(importCompose(out, registry)).toEqual({ ...full, values: { T3_PUBLIC_URL: 'https://t3.example.org' } });
+	});
+
+	it('loads environment written as a list', () => {
+		const text = 'services:\n  a:\n    image: x:1.0\n    environment:\n      - AGENT_MODULES=t3,gh\n      - T3_PORT=4000\n';
+		const loaded = importCompose(text, registry);
+		expect(loaded.modules).toEqual(['t3', 'gh']);
+		expect(loaded.values).toEqual({ T3_PORT: '4000' });
+		expect(loaded.service).toBe('a');
+	});
+
 	it('rejects files from elsewhere', () => {
-		expect(() => importCompose('services: {}', registry)).toThrow(/x-container-agent/);
+		expect(() => importCompose('services: {}', registry)).toThrow(/AGENT_MODULES/);
 		expect(decodeHash('#not-base64!', registry)).toBeNull();
 	});
 });

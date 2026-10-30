@@ -4,7 +4,7 @@ One Docker image for coding agents you control remotely: Claude Code Remote Cont
 
 ## Configurator
 
-`web/` is a static page that turns picked modules and their settings into `compose.yaml` and `.env`, with the steps after the first start. It keeps secrets in `.env`, can load its own `compose.yaml` again, and puts the settings (without secrets) into a shareable link. Each release deploys it to GitHub Pages and attaches the build as `configurator.tar.gz`, which runs on any static host, also under a sub-path.
+`web/` is a static page that turns picked modules and their settings into `compose.yaml` and `.env`, with the steps after the first start. Its editor defines custom modules (tools, apt packages, setup commands, variables and processes) that travel inside `compose.yaml`. It keeps secrets in `.env`, can load its own `compose.yaml` again, and puts the settings (without secrets) into a shareable link. Each release deploys it to GitHub Pages and attaches the build as `configurator.tar.gz`, which runs on any static host, also under a sub-path.
 
 ## Quick start
 
@@ -71,6 +71,27 @@ Your own setup lives in the home volume and survives image updates:
 - **apt packages:** `[bootstrap.packages]` in the same file, e.g. `"apt:ffmpeg" = "latest"`. They are installed on start.
 - **Daemons:** `~/.config/pitchfork/config.toml`, in pitchfork syntax.
 - **Modules:** `~/.config/container-agent/modules/<name>/`. A module with the name of a built-in one replaces it.
+- **Modules in compose.yaml:** mounted under `/etc/container-agent/custom/<name>/` with `configs:` and `content:` (Docker Compose 2.23 or later), which the configurator writes. They win over the other two. Write `$$` for a literal `$` there, compose replaces `$VAR` in the content too.
+
+```yaml
+services:
+  agent:
+    environment:
+      AGENT_MODULES: java
+    configs:
+      - source: java-mise
+        target: /etc/container-agent/custom/java/mise.toml
+      - source: java-module
+        target: /etc/container-agent/custom/java/module.toml
+configs:
+  java-mise:
+    content: |
+      [tools]
+      java = "21"
+  java-module:
+    content: |
+      description = "Java 21"
+```
 
 Daemons: `agent-run pitchfork list`, `agent-run pitchfork logs <name>`, `agent-run pitchfork restart <name>`. The container turns unhealthy when a daemon has failed.
 

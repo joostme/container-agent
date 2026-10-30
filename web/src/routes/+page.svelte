@@ -1,9 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import CustomModuleEditor from '#lib/components/CustomModuleEditor.svelte';
 	import ModuleCard from '#lib/components/ModuleCard.svelte';
 	import OutputPanel from '#lib/components/OutputPanel.svelte';
 	import VarField from '#lib/components/VarField.svelte';
+	import { emptyCustomModule } from '#lib/custom.js';
 	import { defaultConfig, generate } from '#lib/generate.js';
+	import miseTools from '#lib/mise-tools.json';
 	import registryJson from '#lib/registry.json';
 	import { decodeHash, encodeHash, importCompose } from '#lib/share.js';
 	import type { Module, Registry } from '#lib/types.js';
@@ -34,6 +37,13 @@
 			modules: registry.modules.filter((m) => m.kind === 'app')
 		}
 	];
+
+	function addCustom() {
+		const taken = new Set([...registry.modules, ...config.custom].map((m) => m.name));
+		let n = 1;
+		while (taken.has(`custom-${n}`)) n++;
+		config.custom = [...config.custom, emptyCustomModule(`custom-${n}`)];
+	}
 
 	function toggle(name: string) {
 		config.modules = config.modules.includes(name)
@@ -129,7 +139,30 @@
 		</section>
 
 		<section>
-			<h2><span>2</span> Module settings</h2>
+			<h2><span>2</span> Custom modules</h2>
+			<p class="empty">
+				Anything the built-in modules do not cover: tools from the
+				<a href="https://mise.jdx.dev/registry.html">mise registry</a> or a backend such as <code>npm:</code> or
+				<code>pipx:</code>, apt packages, setup commands and processes. They go into <code>compose.yaml</code>
+				and replace a built-in module of the same name.
+			</p>
+			<datalist id="mise-tools">
+				{#each miseTools as tool (tool.name)}
+					<option value={tool.name}>{tool.description}</option>
+				{/each}
+			</datalist>
+			{#each config.custom as _, i (i)}
+				<CustomModuleEditor
+					bind:module={config.custom[i]}
+					builtIn={registry.modules.map((m) => m.name)}
+					onRemove={() => (config.custom = config.custom.filter((_, j) => j !== i))}
+				/>
+			{/each}
+			<button onclick={addCustom}>Add custom module</button>
+		</section>
+
+		<section>
+			<h2><span>3</span> Module settings</h2>
 			{#if configurable.length === 0}
 				<p class="empty">The enabled modules have no settings.</p>
 			{/if}
@@ -146,7 +179,7 @@
 		</section>
 
 		<section>
-			<h2><span>3</span> Container</h2>
+			<h2><span>4</span> Container</h2>
 			<div class="grid">
 				<div class="field">
 					<label for="service">Service and host name</label>
@@ -203,7 +236,7 @@
 <dialog bind:this={importDialog}>
 	<form method="dialog" onsubmit={(e) => (e.preventDefault(), applyImport())}>
 		<h2>Load compose.yaml</h2>
-		<p>Paste a file from this configurator or pick it. Secrets are not stored in it; enter them again.</p>
+		<p>Paste or pick the <code>compose.yaml</code> of a container-agent service; the settings and custom modules are read from it. Secrets live in <code>.env</code>, enter them again.</p>
 		<input type="file" accept=".yaml,.yml" onchange={loadFile} />
 		<textarea bind:value={importText} rows="12" spellcheck="false"></textarea>
 		{#if importError}<p class="error">{importError}</p>{/if}

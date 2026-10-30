@@ -15,8 +15,9 @@ AGENT_HOME=${AGENT_HOME:-/home/${AGENT_USER}}
 AGENT_WORKSPACE=${AGENT_WORKSPACE:-/repos}
 AGENT_MODULES=${AGENT_MODULES:-}
 AUTO_UPDATE=${AUTO_UPDATE:-true}
-# Modules earlier in the path win, so a user module replaces a built-in one
-MODULE_PATH=${CONTAINER_AGENT_MODULE_PATH:-${AGENT_HOME}/.config/container-agent/modules:/etc/container-agent/modules}
+# Modules earlier in the path win: custom modules from compose.yaml (mounted
+# with configs:), then the user's in the home volume, then the built-in ones
+MODULE_PATH=${CONTAINER_AGENT_MODULE_PATH:-/etc/container-agent/custom:${AGENT_HOME}/.config/container-agent/modules:/etc/container-agent/modules}
 STATE_DIR=/run/container-agent
 MISE_CONF_D=/etc/mise/conf.d
 PITCHFORK_CONFIG=/etc/pitchfork/config.toml

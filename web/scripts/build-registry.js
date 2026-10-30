@@ -4,6 +4,9 @@
 //   node scripts/build-registry.js [output]   default: src/lib/registry.json
 //
 // IMAGE_VERSION sets the image tag the registry belongs to (default: latest).
+// Also writes src/lib/mise-tools.json, the tools of the mise registry the
+// configurator suggests for custom modules (empty if mise is not installed).
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,3 +64,17 @@ const registry = {
 mkdirSync(dirname(output), { recursive: true });
 writeFileSync(output, `${JSON.stringify(registry, null, '\t')}\n`);
 console.log(`${output}: ${modules.length} modules, version ${registry.version}`);
+
+let tools = [];
+try {
+	const out = execFileSync('mise', ['registry', '--hide-aliased', '--json'], {
+		encoding: 'utf8',
+		maxBuffer: 32 * 1024 * 1024
+	});
+	tools = JSON.parse(out).map((t) => ({ name: t.short, description: t.description ?? '' }));
+} catch (error) {
+	console.warn(`mise registry not available, no tool suggestions: ${error.message.split('\n')[0]}`);
+}
+const toolsFile = join(root, 'web/src/lib/mise-tools.json');
+writeFileSync(toolsFile, `${JSON.stringify(tools)}\n`);
+console.log(`${toolsFile}: ${tools.length} tools`);
