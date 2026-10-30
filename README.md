@@ -13,6 +13,7 @@ docker compose logs -f          # the first start installs all tools
 # One-time logins, persisted in the home volume
 docker compose exec agent agent-run claude      # then /login
 docker compose exec agent t3-pair               # pair a T3 app
+docker compose exec agent codex-pair            # pair the ChatGPT app with Codex
 ```
 
 `agent-run [command]` runs a command as the agent user with the mise tools and environment; without a command it opens a shell.
@@ -24,7 +25,8 @@ $ docker run --rm ghcr.io/joostme/container-agent modules
 claude           Claude Code CLI; log in once with `agent-run claude` and /login
 claude-remote    Claude Code Remote Control: sessions in claude.ai/code and the Claude apps
 code-server      VS Code in the browser (code-server), opens the workspace
-codex            OpenAI Codex CLI, e.g. as a provider in T3 Code; log in with `agent-run codex login`
+codex            OpenAI Codex CLI, e.g. as a provider in T3 Code; log in with `agent-run codex login --device-auth`
+codex-remote     Codex Remote Control: sessions in the ChatGPT app, listed under the container's host name; pair with `codex-pair`
 gh               GitHub CLI (gh); uses GH_TOKEN or GITHUB_TOKEN if set
 oh-my-zsh        Oh My Zsh for the agent user's zsh
 opencode         OpenCode server with its web UI

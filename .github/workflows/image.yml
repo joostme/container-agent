@@ -41,7 +41,7 @@ jobs:
       - name: Start container
         run: |
           docker run -d --name smoke \
-            -e AGENT_MODULES=code-server,sshd,oh-my-zsh,gh,t3 \
+            -e AGENT_MODULES=code-server,sshd,oh-my-zsh,gh,t3,codex \
             -e CODE_SERVER_PASSWORD=smoke \
             container-agent:smoke
       - name: Wait for healthy
@@ -59,7 +59,8 @@ jobs:
       - name: Check daemons and tools
         run: |
           docker exec smoke agent-run pitchfork list
-          for tool in code-server gh t3; do docker exec smoke agent-run which "${tool}"; done
+          for tool in code-server gh t3 codex; do docker exec smoke agent-run which "${tool}"; done
+          docker exec smoke agent-run grep -q '^sandbox_mode = "danger-full-access"' /home/agent/.codex/config.toml
           for tool in qrencode t3-pair; do docker exec smoke which "${tool}"; done
           docker exec smoke agent-run test -d /home/agent/.oh-my-zsh
           docker exec smoke agent-run curl -sf -o /dev/null http://127.0.0.1:8080/healthz
