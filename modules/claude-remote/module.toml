@@ -1,6 +1,7 @@
 #:schema ../../schema/module.schema.json
 description = "Claude Code Remote Control: sessions in claude.ai/code and the Claude apps"
 requires = ["claude"]
+next_steps = ["After the login the container shows up in claude.ai/code and the Claude apps under CLAUDE_REMOTE_NAME"]
 
 [env.CLAUDE_REMOTE_NAME]
 description = "Name in the session list of claude.ai/code and the apps"

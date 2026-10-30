@@ -1,2 +1,7 @@
 #:schema ../../schema/module.schema.json
 description = "GitHub CLI (gh); uses GH_TOKEN or GITHUB_TOKEN if set"
+next_steps = ["Set GH_TOKEN, or log in once: `agent-run gh auth login`"]
+
+[env.GH_TOKEN]
+description = "GitHub token for gh and the GitHub API; also avoids rate limits when mise installs tools"
+secret = true

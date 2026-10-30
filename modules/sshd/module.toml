@@ -1,7 +1,9 @@
 #:schema ../../schema/module.schema.json
 description = "SSH server for the agent user (key login only), e.g. for Remote-SSH from VS Code or Cursor"
+next_steps = ["Add your public key to ~/.ssh/authorized_keys, e.g. through the SSH key mount, then connect as the agent user"]
 
 [env.SSH_PORT]
+description = "Port of the SSH server"
 default = "22"
 port = "tcp"
 

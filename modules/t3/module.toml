@@ -1,8 +1,10 @@
 #:schema ../../schema/module.schema.json
 description = "T3 Code server for the T3 web, desktop and mobile apps; drives Claude, Codex, OpenCode and more"
 after = ["claude", "codex", "opencode"]
+next_steps = ["Pair the T3 app or a browser: `t3-pair` (set T3_PUBLIC_URL or T3_PUBLIC_HOST first, so the link works from other devices)"]
 
 [env.T3_PORT]
+description = "Port of the T3 server"
 default = "3773"
 port = "http"
 

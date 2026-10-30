@@ -1,7 +1,9 @@
 #:schema ../../schema/module.schema.json
 description = "VS Code in the browser (code-server), opens the workspace"
+next_steps = ["Open code-server in the browser and sign in with CODE_SERVER_PASSWORD"]
 
 [env.CODE_SERVER_PORT]
+description = "Port of code-server"
 default = "8080"
 port = "http"
 

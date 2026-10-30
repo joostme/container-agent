@@ -1,5 +1,6 @@
 #:schema ../../schema/module.schema.json
 description = "OpenAI Codex CLI, e.g. as a provider in T3 Code; log in with `agent-run codex login --device-auth`"
+next_steps = ["Log in once: `agent-run codex login --device-auth`"]
 
 [env.CODEX_HOME]
 description = "Directory of the Codex config, login and sessions. Unset: ~/.codex."

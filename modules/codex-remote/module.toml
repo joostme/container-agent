@@ -1,6 +1,7 @@
 #:schema ../../schema/module.schema.json
 description = "Codex Remote Control: sessions in the ChatGPT app, listed under the container's host name; pair with `codex-pair`"
 requires = ["codex"]
+next_steps = ["Pair the ChatGPT app: `codex-pair`, then enter the code in the app"]
 
 # Waits for a Codex login (`agent-run codex login --device-auth`), checking
 # every 30 seconds, then runs the server in the foreground (the background

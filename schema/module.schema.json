@@ -42,6 +42,14 @@
       "minItems": 1,
       "uniqueItems": true
     },
+    "next_steps": {
+      "description": "What to do after the first start, e.g. log in or pair an app. One step per item; commands in backticks run inside the container (configurators prefix them with `docker compose exec`).",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "env": {
       "description": "Environment variables the module reads. Keys are variable names.",
       "type": "object",

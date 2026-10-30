@@ -1,7 +1,9 @@
 #:schema ../../schema/module.schema.json
 description = "OpenCode server with its web UI"
+next_steps = ["Open the OpenCode web UI and sign in as opencode with OPENCODE_SERVER_PASSWORD"]
 
 [env.OPENCODE_PORT]
+description = "Port of the OpenCode web UI and API"
 default = "4096"
 port = "http"
 
