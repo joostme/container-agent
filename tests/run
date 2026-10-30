@@ -49,12 +49,12 @@ expect_line() {  # name, line, env...
     grep -Fxq -- "${line}" <<< "${out}" && pass "${name}" || fail "${name}" "missing line: ${line}"$'\n'"${out}"
 }
 
-expect_order "requires pulls in claude, after puts it before t3" \
-    "t3,claude-remote" "claude t3 claude-remote"
+expect_order "requires pulls in claude and node, after puts claude before t3" \
+    "t3,claude-remote" "node claude t3 claude-remote"
 expect_order "codex-remote pulls in codex, t3 comes after it" \
-    "t3,codex-remote" "codex t3 codex-remote"
+    "t3,codex-remote" "node codex t3 codex-remote"
 expect_order "after only orders enabled modules" \
-    "t3,codex,code-server" "codex t3 code-server"
+    "t3,codex,code-server" "node codex t3 code-server"
 expect_order "duplicates and spaces are fine" \
     "gh, gh code-server" "gh code-server"
 expect_order "no modules" "" ""

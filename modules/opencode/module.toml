@@ -1,5 +1,6 @@
 #:schema ../../schema/module.schema.json
 description = "OpenCode server with its web UI"
+requires = ["node"]
 next_steps = ["Open the OpenCode web UI and sign in as opencode with OPENCODE_SERVER_PASSWORD"]
 
 [env.OPENCODE_PORT]

@@ -1,0 +1,6 @@
+#:schema ../../schema/module.schema.json
+description = "pnpm, the Node.js package manager"
+requires = ["node"]
+
+[env.MISE_PNPM_VERSION]
+description = "Version to install instead of latest, e.g. 10; mise reads this variable itself"

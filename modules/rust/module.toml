@@ -1,0 +1,5 @@
+#:schema ../../schema/module.schema.json
+description = "Rust with cargo, through rustup"
+
+[env.MISE_RUST_VERSION]
+description = "Version to install instead of stable, e.g. 1.90 or stable; mise reads this variable itself"
