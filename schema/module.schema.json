@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/joostme/container-agent/main/schema/module.schema.json",
   "title": "container-agent module",
-  "description": "module.toml of a container-agent module: what the module needs and which processes it runs. Tools, apt packages and setup hooks live in the mise.toml next to it.",
+  "description": "module.toml of a container-agent module: what the module needs and which processes it runs. A module with daemons is a service, one without an app. Tools, apt packages and setup hooks live in the mise.toml next to it.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -61,7 +61,7 @@
       }
     },
     "daemons": {
-      "description": "Long-running processes in pitchfork syntax (https://pitchfork.jdx.dev), checked against the schema of the pitchfork version in the image. They run as the agent user with the mise environment, start on boot and in the workspace unless `boot_start` or `dir` say otherwise.",
+      "description": "Long-running processes, which make the module a service, in pitchfork syntax (https://pitchfork.jdx.dev), checked against the schema of the pitchfork version in the image. They run as the agent user with the mise environment, start on boot and in the workspace unless `boot_start` or `dir` say otherwise.",
       "type": "object",
       "propertyNames": {
         "$ref": "#/$defs/moduleName"

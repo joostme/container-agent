@@ -24,25 +24,36 @@ docker compose exec agent codex-pair            # pair the ChatGPT app with Code
 
 ## Modules
 
+Everything you can enable is a module. **Services** run a process: remote control, web UIs, servers. **Apps** only install and set up: agents, CLIs and runtimes such as Node.js, Python or uv.
+
 ```
 $ docker run --rm ghcr.io/joostme/container-agent modules
-claude           Claude Code CLI; log in once with `agent-run claude` and /login
-claude-remote    Claude Code Remote Control: sessions in claude.ai/code and the Claude apps
-code-server      VS Code in the browser (code-server), opens the workspace
-codex            OpenAI Codex CLI, e.g. as a provider in T3 Code; log in with `agent-run codex login --device-auth`
-codex-remote     Codex Remote Control: sessions in the ChatGPT app, listed under the container's host name; pair with `codex-pair`
-gh               GitHub CLI (gh); uses GH_TOKEN or GITHUB_TOKEN if set
-oh-my-zsh        Oh My Zsh for the agent user's zsh
-opencode         OpenCode server with its web UI
-sshd             SSH server for the agent user (key login only), e.g. for Remote-SSH from VS Code or Cursor
-t3               T3 Code server for the T3 web, desktop and mobile apps; drives Claude, Codex, OpenCode and more
+bun              app      Bun, the JavaScript runtime and package manager
+claude           app      Claude Code CLI; log in once with `agent-run claude` and /login
+claude-remote    service  Claude Code Remote Control: sessions in claude.ai/code and the Claude apps
+code-server      service  VS Code in the browser (code-server), opens the workspace
+codex            app      OpenAI Codex CLI, e.g. as a provider in T3 Code; log in with `agent-run codex login --device-auth`
+codex-remote     service  Codex Remote Control: sessions in the ChatGPT app, listed under the container's host name; pair with `codex-pair`
+gh               app      GitHub CLI (gh); uses GH_TOKEN or GITHUB_TOKEN if set
+go               app      Go
+node             app      Node.js with npm; needed by agents that ship as npm packages
+oh-my-zsh        app      Oh My Zsh for the agent user's zsh
+opencode         service  OpenCode server with its web UI
+pnpm             app      pnpm, the Node.js package manager
+python           app      Python
+rust             app      Rust with cargo, through rustup
+sshd             service  SSH server for the agent user (key login only), e.g. for Remote-SSH from VS Code or Cursor
+t3               service  T3 Code server for the T3 web, desktop and mobile apps; drives Claude, Codex, OpenCode and more
+uv               app      uv, the Python package and project manager
 ```
 
-Modules a module `requires` are enabled with it (`claude-remote` brings `claude`). Each module documents its variables, defaults and ports in its `module.toml`; `container-agent plan` shows the resolved setup:
+Modules a module `requires` are enabled with it (`claude-remote` brings `claude`, which brings `node`). Each module documents its variables, defaults and ports in its `module.toml`; `container-agent plan` shows the resolved setup:
 
 ```bash
 docker compose exec agent container-agent plan
 ```
+
+Runtime apps install a sensible default version. Pick another one with the variable mise reads itself, e.g. `MISE_NODE_VERSION=22` or `MISE_PYTHON_VERSION=3.13`. Any other tool from the [mise registry](https://mise.jdx.dev/registry.html) goes into your own mise config.
 
 ## Configuration
 

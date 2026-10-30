@@ -22,10 +22,17 @@
 	const enabled = $derived(new Set(output.resolution.order.map((m) => m.name)));
 	const configurable = $derived(output.resolution.order.filter((m) => m.env.length > 0));
 
-	// Modules with a daemon run something you connect to; the rest add tools
-	const groups: { title: string; modules: Module[] }[] = [
-		{ title: 'Services', modules: registry.modules.filter((m) => m.daemons.length > 0) },
-		{ title: 'Tools and setup', modules: registry.modules.filter((m) => m.daemons.length === 0) }
+	const groups: { title: string; hint: string; modules: Module[] }[] = [
+		{
+			title: 'Services',
+			hint: 'Run a process: remote control, web UIs, servers',
+			modules: registry.modules.filter((m) => m.kind === 'service')
+		},
+		{
+			title: 'Apps',
+			hint: 'Install and set up: agents, CLIs, runtimes',
+			modules: registry.modules.filter((m) => m.kind === 'app')
+		}
 	];
 
 	function toggle(name: string) {
@@ -107,7 +114,7 @@
 		<section>
 			<h2><span>1</span> Modules</h2>
 			{#each groups as group (group.title)}
-				<h3>{group.title}</h3>
+				<h3>{group.title} <span>{group.hint}</span></h3>
 				<div class="cards">
 					{#each group.modules as module (module.name)}
 						<ModuleCard
@@ -279,6 +286,12 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: var(--muted);
+	}
+	h3 span {
+		margin-left: 0.4rem;
+		text-transform: none;
+		letter-spacing: normal;
+		font-weight: 400;
 	}
 	.cards {
 		display: grid;

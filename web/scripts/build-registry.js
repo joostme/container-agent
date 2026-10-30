@@ -22,8 +22,11 @@ function readModule(name) {
 	const meta = readToml(join(dir, 'module.toml'));
 	const mise = readToml(join(dir, 'mise.toml'));
 	const bin = join(dir, 'bin');
+	const daemons = Object.keys(meta.daemons ?? {});
 	return {
 		name,
+		// services run a process, apps only install and set up
+		kind: daemons.length > 0 ? 'service' : 'app',
 		description: meta.description,
 		requires: meta.requires ?? [],
 		after: meta.after ?? [],
@@ -37,7 +40,7 @@ function readModule(name) {
 			secret: spec.secret ?? false,
 			port: spec.port ?? null
 		})),
-		daemons: Object.keys(meta.daemons ?? {}),
+		daemons,
 		tools: Object.keys(mise.tools ?? {}),
 		packages: Object.keys(mise.bootstrap?.packages ?? {}).map((p) => p.replace(/^apt:/, '')),
 		commands: existsSync(bin) ? readdirSync(bin).sort() : []

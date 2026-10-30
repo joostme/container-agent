@@ -9,6 +9,8 @@ export interface EnvVar {
 
 export interface Module {
 	name: string;
+	/** Services run a process, apps only install and set up. */
+	kind: 'service' | 'app';
 	description: string;
 	requires: string[];
 	after: string[];

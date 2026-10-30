@@ -4,7 +4,7 @@
 #
 #   container-agent start     entrypoint, runs as root
 #   container-agent plan      print the resolved modules and generated config
-#   container-agent modules   list the available modules
+#   container-agent modules   list the available modules (services and apps)
 #   container-agent health    healthcheck: no daemon has failed
 set -euo pipefail
 
@@ -332,8 +332,9 @@ plan() {
     pitchfork_config
 }
 
+# Modules with daemons are services, the others apps
 modules() {
-    local dir file name IFS=:
+    local dir file name kind IFS=:
     declare -A seen=()
     for dir in ${MODULE_PATH}; do
         for file in "${dir}"/*/module.toml; do
@@ -341,7 +342,9 @@ modules() {
             name=$(basename "$(dirname "${file}")")
             [ -z "${seen[${name}]:-}" ] || continue
             seen[${name}]=1
-            printf '%-16s %s\n' "${name}" "$(yq -p toml -o yaml '.description' "${file}")"
+            kind=app
+            [ "$(yq -p toml -o yaml '.daemons // {} | length' "${file}")" -gt 0 ] && kind=service
+            printf '%-16s %-8s %s\n' "${name}" "${kind}" "$(yq -p toml -o yaml '.description' "${file}")"
         done
     done | sort
 }
