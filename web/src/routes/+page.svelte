@@ -21,7 +21,6 @@
 	const output = $derived(generate(config, registry));
 	const enabled = $derived(new Set(output.resolution.order.map((m) => m.name)));
 	const configurable = $derived(output.resolution.order.filter((m) => m.env.length > 0));
-	const httpPorts = $derived(output.ports.filter((p) => p.protocol === 'http'));
 
 	// Modules with a daemon run something you connect to; the rest add tools
 	const groups: { title: string; modules: Module[] }[] = [
@@ -180,14 +179,6 @@
 					<input id="ssh" bind:value={config.sshKeys} placeholder="e.g. ~/.ssh, empty for none" />
 					<small>Mounted read-only and copied into <code>~/.ssh</code>.</small>
 				</div>
-				<div class="field">
-					<label for="arch">Host architecture</label>
-					<select id="arch" bind:value={config.arch}>
-						<option value="any">Any</option>
-						<option value="amd64">amd64 (x86_64)</option>
-						<option value="arm64">arm64 (Apple Silicon, Raspberry Pi)</option>
-					</select>
-				</div>
 				<label class="check">
 					<input type="checkbox" bind:checked={config.autoUpdate} />
 					Upgrade tools on every start
@@ -195,55 +186,6 @@
 			</div>
 		</section>
 
-		<section>
-			<h2><span>4</span> Access</h2>
-			<div class="choice">
-				<label class="check">
-					<input type="radio" bind:group={config.exposure} value="ports" />
-					Publish ports
-				</label>
-				<label class="check">
-					<input type="radio" bind:group={config.exposure} value="traefik" />
-					Behind Traefik
-				</label>
-			</div>
-			{#if output.ports.length === 0}
-				<p class="empty">No enabled module listens on a port.</p>
-			{:else if config.exposure === 'ports'}
-				<p class="empty">
-					Published: {output.ports.map((p) => `${p.port} (${p.module})`).join(', ')}. Keep them inside your
-					network or behind a VPN.
-				</p>
-			{:else}
-				<div class="grid">
-					<div class="field">
-						<label for="network">Traefik network</label>
-						<input id="network" bind:value={config.traefik.network} />
-					</div>
-					<div class="field">
-						<label for="entrypoint">Entrypoint</label>
-						<input id="entrypoint" bind:value={config.traefik.entrypoint} />
-					</div>
-					<div class="field">
-						<label for="resolver">Certificate resolver</label>
-						<input id="resolver" bind:value={config.traefik.certResolver} placeholder="empty for none" />
-					</div>
-					{#each httpPorts as port (port.variable)}
-						<div class="field">
-							<label for={`host-${port.variable}`}>Host name for {port.module}</label>
-							<input
-								id={`host-${port.variable}`}
-								bind:value={config.traefik.hosts[port.variable]}
-								placeholder={`${port.module}.example.com`}
-							/>
-						</div>
-					{/each}
-				</div>
-				{#if output.ports.some((p) => p.protocol === 'tcp')}
-					<p class="empty">TCP ports such as SSH stay published directly.</p>
-				{/if}
-			{/if}
-		</section>
 	</div>
 
 	<aside>
@@ -376,11 +318,6 @@
 	}
 	.check input {
 		accent-color: var(--accent);
-	}
-	.choice {
-		display: flex;
-		gap: 1.5rem;
-		margin-bottom: 0.8rem;
 	}
 	dialog {
 		width: min(680px, 92vw);

@@ -45,13 +45,4 @@ export interface Config {
 	/** Host directory with SSH keys, mounted read-only; empty for none. */
 	sshKeys: string;
 	autoUpdate: boolean;
-	arch: Arch | 'any';
-	exposure: 'ports' | 'traefik';
-	traefik: {
-		network: string;
-		entrypoint: string;
-		certResolver: string;
-		/** Host name per http port variable. */
-		hosts: Record<string, string>;
-	};
 }

@@ -38,10 +38,7 @@ export function defaultConfig(registry: Registry): Config {
 		agentUser: 'agent',
 		dataDir: './data',
 		sshKeys: '',
-		autoUpdate: true,
-		arch: 'any',
-		exposure: 'ports',
-		traefik: { network: 'proxy', entrypoint: 'websecure', certResolver: 'letsencrypt', hosts: {} }
+		autoUpdate: true
 	};
 }
 
@@ -61,13 +58,6 @@ export function portsOf(config: Config, modules: Module[]): Port[] {
 				port: effectiveValue(config, variable)
 			}))
 	);
-}
-
-/** Router and service name for Traefik, unique per port variable. */
-export function routerName(config: Config, port: Port, ports: Port[]): string {
-	const sameModule = ports.filter((p) => p.module === port.module && p.protocol === 'http');
-	const suffix = sameModule.length > 1 ? `-${port.variable.toLowerCase().replaceAll('_', '-')}` : '';
-	return `${config.service}-${port.module}${suffix}`;
 }
 
 function environment(config: Config, modules: Module[]): Record<string, string> {
@@ -105,22 +95,6 @@ function envFile(modules: Module[], config: Config): string {
 	return `${lines.join('\n')}\n`;
 }
 
-function traefikLabels(config: Config, ports: Port[]): Record<string, string> {
-	const labels: Record<string, string> = { 'traefik.enable': 'true' };
-	for (const port of ports.filter((p) => p.protocol === 'http')) {
-		const name = routerName(config, port, ports);
-		const host = config.traefik.hosts[port.variable] || `${name}.example.com`;
-		labels[`traefik.http.routers.${name}.rule`] = `Host(\`${host}\`)`;
-		labels[`traefik.http.routers.${name}.entrypoints`] = config.traefik.entrypoint;
-		if (config.traefik.certResolver) {
-			labels[`traefik.http.routers.${name}.tls.certresolver`] = config.traefik.certResolver;
-		}
-		labels[`traefik.http.routers.${name}.service`] = name;
-		labels[`traefik.http.services.${name}.loadbalancer.server.port`] = port.port;
-	}
-	return labels;
-}
-
 /**
  * Settings stored in compose.yaml and the share link, so the configurator can
  * load them again: only what differs from the defaults, never secrets.
@@ -147,7 +121,6 @@ function compose(config: Config, registry: Registry, modules: Module[], ports: P
 	const volumes = [`${config.dataDir}/home:${home}`, `${config.dataDir}/repos:/repos`];
 	if (config.sshKeys) volumes.push(`${config.sshKeys}:${home}/.ssh-keys:ro`);
 
-	const published = config.exposure === 'traefik' ? ports.filter((p) => p.protocol === 'tcp') : ports;
 	const service: Record<string, unknown> = {
 		image: `${registry.image}:${config.imageTag || registry.version}`,
 		container_name: config.service,
@@ -156,14 +129,9 @@ function compose(config: Config, registry: Registry, modules: Module[], ports: P
 		environment: environment(config, modules),
 		volumes
 	};
-	if (published.length) service.ports = published.map((p) => `${p.port}:${p.port}`);
+	if (ports.length) service.ports = ports.map((p) => `${p.port}:${p.port}`);
 
 	const doc: Record<string, unknown> = { services: { [config.service]: service } };
-	if (config.exposure === 'traefik' && ports.some((p) => p.protocol === 'http')) {
-		service.labels = traefikLabels(config, ports);
-		service.networks = [config.traefik.network];
-		doc.networks = { [config.traefik.network]: { external: true } };
-	}
 	doc[SETTINGS_KEY] = storedSettings(config, registry);
 
 	const header = [
@@ -207,9 +175,6 @@ function warnings(config: Config, resolution: Resolution, ports: Port[]): string
 		result.push('The service name may only contain letters, digits, dots, dashes and underscores.');
 	}
 	for (const module of resolution.order) {
-		if (config.arch !== 'any' && module.arch && !module.arch.includes(config.arch)) {
-			result.push(`${module.name} does not run on ${config.arch}.`);
-		}
 		for (const variable of module.env) {
 			if (variable.required && !effectiveValue(config, variable)) {
 				result.push(`${variable.name} is required by ${module.name}; the container will not start without it.`);
@@ -222,13 +187,6 @@ function warnings(config: Config, resolution: Resolution, ports: Port[]): string
 		if (other) result.push(`Port ${port.port} is used by ${other} and ${port.variable}.`);
 		else seen.set(port.port, port.variable);
 		if (!/^\d+$/.test(port.port)) result.push(`${port.variable} must be a port number.`);
-	}
-	if (config.exposure === 'traefik') {
-		for (const port of ports.filter((p) => p.protocol === 'http')) {
-			if (!config.traefik.hosts[port.variable]) {
-				result.push(`Set a host name for ${port.module}; the labels use a placeholder.`);
-			}
-		}
 	}
 	const codeServer = resolution.order.find((m) => m.name === 'code-server');
 	if (codeServer && !config.values.CODE_SERVER_PASSWORD) {

@@ -50,24 +50,6 @@ describe('generate', () => {
 		expect(service(out.compose).ports).toEqual(['4000:4000']);
 	});
 
-	it('uses Traefik labels for http ports and keeps tcp ports published', () => {
-		const out = generate(
-			config({
-				modules: ['t3', 'sshd'],
-				exposure: 'traefik',
-				traefik: { ...defaultConfig(registry).traefik, hosts: { T3_PORT: 't3.example.org' } }
-			}),
-			registry
-		);
-		const doc = parse(out.compose);
-		const svc = doc.services.agent;
-		expect(svc.ports).toEqual(['22:22']);
-		expect(svc.labels['traefik.http.routers.agent-t3.rule']).toBe('Host(`t3.example.org`)');
-		expect(svc.labels['traefik.http.services.agent-t3.loadbalancer.server.port']).toBe('3773');
-		expect(svc.networks).toEqual(['proxy']);
-		expect(doc.networks).toEqual({ proxy: { external: true } });
-	});
-
 	it('mounts SSH keys under the agent user', () => {
 		const out = generate(config({ modules: ['gh'], sshKeys: '~/.ssh', agentUser: 'dev' }), registry);
 		const svc = service(out.compose);

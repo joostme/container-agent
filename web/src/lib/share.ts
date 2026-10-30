@@ -26,16 +26,7 @@ export function normalize(input: unknown, registry: Registry): Config {
 		agentUser: pick('agentUser'),
 		dataDir: pick('dataDir'),
 		sshKeys: pick('sshKeys'),
-		autoUpdate: pick('autoUpdate'),
-		arch: raw.arch === 'amd64' || raw.arch === 'arm64' ? raw.arch : 'any',
-		exposure: raw.exposure === 'traefik' ? 'traefik' : 'ports',
-		traefik: {
-			...base.traefik,
-			...Object.fromEntries(
-				Object.entries(raw.traefik ?? {}).filter(([k, v]) => k !== 'hosts' && typeof v === 'string')
-			),
-			hosts: strings(raw.traefik?.hosts)
-		}
+		autoUpdate: pick('autoUpdate')
 	};
 }
 
