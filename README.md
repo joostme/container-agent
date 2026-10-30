@@ -4,7 +4,7 @@ One Docker image for coding agents you control remotely: Claude Code Remote Cont
 
 ## Configurator
 
-`web/` is a static page that turns picked modules and their settings into `compose.yaml` and `.env`, with the steps after the first start. It keeps secrets in `.env`, can load its own `compose.yaml` again, and puts the settings (without secrets) into a shareable link. Each release attaches its build as `configurator.tar.gz`; serve it from any static host, e.g. GitHub Pages or Cloudflare Pages, also under a sub-path.
+`web/` is a static page that turns picked modules and their settings into `compose.yaml` and `.env`, with the steps after the first start. It keeps secrets in `.env`, can load its own `compose.yaml` again, and puts the settings (without secrets) into a shareable link. Each release deploys it to GitHub Pages and attaches the build as `configurator.tar.gz`, which runs on any static host, also under a sub-path.
 
 ## Quick start
 
@@ -141,6 +141,8 @@ A `v*` tag publishes the image as `0.1.0`, `0.1` and `0` (pushes to `main` publi
 
 - `registry.json`: the modules of this version, with their variables, ports and next steps; the configurator is built from it
 - `configurator.tar.gz`: the configurator for this version, generating `compose.yaml` with the image tag `0.1.0`
+
+The same tag deploys that configurator to GitHub Pages. Pages has to be enabled once under **Settings → Pages → Source: GitHub Actions**.
 
 ## License
 
