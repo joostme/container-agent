@@ -346,13 +346,19 @@ modules() {
     done | sort
 }
 
+# Healthy once setup has finished and every daemon that starts on boot runs.
+# The supervisor only starts after setup, and the CLI must not start one of
+# its own when there is none yet.
 health() {
-    local failed
+    local list down
     # pitchfork keeps its socket in the agent user's home
-    failed=$(as_agent pitchfork list --hide-header --status errored --status failed) \
-        || { echo "pitchfork supervisor not reachable"; exit 1; }
-    if [ -n "${failed}" ]; then
-        echo "${failed}"
+    list=$(as_agent PITCHFORK_SUPERVISOR_AUTO_START=false pitchfork list --json 2> /dev/null) \
+        || { echo "pitchfork supervisor is not running yet (setup in progress?)"; exit 1; }
+    # available: no boot start; completed: finished one-shot
+    down=$(jq -r '.[] | select(.status | IN("running", "available", "disabled", "completed") | not)
+        | "\(.name): \(.status) \(.error // "")"' <<< "${list}")
+    if [ -n "${down}" ]; then
+        echo "${down}"
         exit 1
     fi
 }

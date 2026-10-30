@@ -29,6 +29,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zsh \
     && rm -rf /var/lib/apt/lists/*
 
+# Packages from [bootstrap.packages] come without recommends; openssh-server
+# would otherwise pull in systemd and dbus
+RUN printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n' \
+        > /etc/apt/apt.conf.d/99container-agent
+
 # mise, pitchfork and yq are pinned here (Renovate bumps them) instead of
 # self-updating on start, so a new release cannot break a running setup
 RUN set -eux; \
@@ -55,7 +60,8 @@ ENV AGENT_USER=agent \
     PUID=1000 \
     PGID=1000 \
     AGENT_WORKSPACE=/repos \
-    AUTO_UPDATE=true
+    AUTO_UPDATE=true \
+    PITCHFORK_SUPERVISOR_AUTO_START=false
 
 # Executables of the enabled modules and the mise shims of the agent user, both
 # linked on start, so `docker exec` finds the tools without a login shell

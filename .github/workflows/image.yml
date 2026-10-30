@@ -62,6 +62,8 @@ jobs:
           docker exec smoke agent-run sh -c 'command -v code-server gh t3 && test -d ~/.oh-my-zsh'
           docker exec smoke agent-run sh -c 'curl -sf -o /dev/null http://127.0.0.1:8080/healthz'
           docker exec smoke sh -c 'command -v qrencode t3-pair'
+          # module packages come without recommends
+          docker exec smoke sh -c '! dpkg -s systemd > /dev/null 2>&1'
       - name: Logs
         if: always()
         run: |
