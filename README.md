@@ -2,6 +2,10 @@
 
 One Docker image for coding agents you control remotely: Claude Code Remote Control, T3 Code, OpenCode, code-server and more. You pick what runs with `AGENT_MODULES`; tools come from [mise](https://mise.jdx.dev), long-running processes are supervised by [pitchfork](https://pitchfork.jdx.dev).
 
+## Configurator
+
+`web/` is a static page that turns picked modules and their settings into `compose.yaml` and `.env`, with the steps after the first start. It keeps secrets in `.env`, can load its own `compose.yaml` again, and puts the settings (without secrets) into a shareable link. Each release attaches its build as `configurator.tar.gz`; serve it from any static host, e.g. GitHub Pages or Cloudflare Pages, also under a sub-path.
+
 ## Quick start
 
 ```bash
@@ -70,13 +74,14 @@ modules/t3/
 └── bin/          # optional: executables put on the PATH, e.g. t3-pair
 ```
 
-`module.toml` has a JSON schema, so editors with a TOML language server complete and check it. For daemons it links the schema of the pitchfork version in the image. [Tombi](https://tombi-toml.github.io/tombi/) also flags unknown daemon options such as a misspelled `retry`; Taplo (Even Better TOML) completes them but lets typos through, and pitchfork ignores unknown options silently. Put this in the first line:
+`module.toml` has a JSON schema, so editors with a TOML language server complete and check it. For daemons it links the schema of the pitchfork version in the image. [Tombi](https://tombi-toml.github.io/tombi/) also flags unknown daemon options such as a misspelled `retry`; Taplo (Even Better TOML) completes them but lets typos through, and pitchfork ignores unknown options silently. Put this in the first line, with the version of the image the module is for:
 
 ```toml
-#:schema https://raw.githubusercontent.com/joostme/container-agent/main/schema/module.schema.json
+#:schema https://raw.githubusercontent.com/joostme/container-agent/v0.1.0/schema/module.schema.json
 description = "T3 Code server"
 after = ["claude", "codex", "opencode"]   # set up and start after these, if enabled
 # requires = ["claude"]                   # enable these too, set them up first
+next_steps = ["Pair a device: `t3-pair`"] # shown by the configurator; `commands` run in the container
 
 [env.T3_PORT]
 default = "3773"   # used when the container leaves it empty
@@ -116,4 +121,27 @@ mise run lint     # shellcheck, TOML against the schemas (tombi), pinned version
 mise run test     # module resolution and generated pitchfork config
 ```
 
+```bash
+cd web
+npm ci
+npm run dev       # configurator on http://localhost:5173, registry built from ../modules
+npm test          # generator tests, module order compared with the entrypoint
+npm run check     # svelte-check
+```
+
 Renovate bumps pitchfork in the `Dockerfile` and in the schema link in one PR. The CI builds the image, starts it with a few modules until it is healthy, and publishes `linux/amd64` and `linux/arm64` to `ghcr.io/joostme/container-agent`.
+
+## Releases
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+A `v*` tag publishes the image as `0.1.0`, `0.1` and `0` (pushes to `main` publish `latest`), then creates a GitHub release with generated notes and two files:
+
+- `registry.json`: the modules of this version, with their variables, ports and next steps; the configurator is built from it
+- `configurator.tar.gz`: the configurator for this version, generating `compose.yaml` with the image tag `0.1.0`
+
+## License
+
+[MIT](LICENSE)

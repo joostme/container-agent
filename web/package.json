@@ -1,0 +1,32 @@
+{
+	"name": "container-agent-configurator",
+	"private": true,
+	"version": "0.0.1",
+	"type": "module",
+	"scripts": {
+		"registry": "node scripts/build-registry.js",
+		"dev": "npm run registry && vite dev",
+		"build": "npm run registry && vite build",
+		"preview": "vite preview",
+		"prepare": "svelte-kit sync || echo ''",
+		"check": "npm run registry && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"test": "npm run registry && vitest --run"
+	},
+	"devDependencies": {
+		"@sveltejs/adapter-static": "^4.0.0",
+		"@sveltejs/kit": "^3.0.0",
+		"@sveltejs/vite-plugin-svelte": "^7.2.0",
+		"@types/node": "^26.6.6",
+		"smol-toml": "^1.9.1",
+		"svelte": "^5.57.1",
+		"svelte-check": "^4.6.0",
+		"typescript": "^6.0.3",
+		"vite": "^8.3.0",
+		"vitest": "^4.1.8",
+		"yaml": "^2.9.1"
+	},
+	"imports": {
+		"#lib/*": "./src/lib/*"
+	},
+	"description": "Static configurator that turns picked container-agent modules into compose.yaml"
+}

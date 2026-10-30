@@ -1,5 +1,7 @@
 # Development tools for this repository (not part of the image)
 [tools]
+# the configurator in web/
+node = "24"
 pitchfork = "2.32.3"
 yq = "4.54.1"
 # Unlike taplo, tombi supports unevaluatedProperties, which the module schema

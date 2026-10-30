@@ -1,4 +1,4 @@
-name: Image
+name: Build
 
 on:
   push:
@@ -22,6 +22,32 @@ jobs:
       - uses: jdx/mise-action@v3
       - run: mise run lint
       - run: mise run test
+
+  # The configurator, built for the image version of this ref: the tag without
+  # its v for releases, latest otherwise
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      # node, and yq for the test that compares with the entrypoint
+      - uses: jdx/mise-action@v3
+      - name: Image version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then version="${GITHUB_REF_NAME#v}"; else version=latest; fi
+          echo "IMAGE_VERSION=${version}" >> "${GITHUB_ENV}"
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: |
+          npm run build
+          cp src/lib/registry.json build/registry.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: configurator
+          path: web/build
 
   # Starts the image with modules that need no login and waits until the
   # container reports healthy, i.e. setup ran and all daemons are up
@@ -111,3 +137,26 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # On a v* tag, after the image is out: a GitHub release with the module
+  # registry and the configurator of that version
+  release:
+    needs: [publish, web]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: configurator
+          path: configurator
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp configurator/registry.json registry.json
+          tar -czf configurator.tar.gz -C configurator .
+          gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" --generate-notes \
+            registry.json configurator.tar.gz
