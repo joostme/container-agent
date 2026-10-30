@@ -59,11 +59,15 @@ jobs:
       - name: Check daemons and tools
         run: |
           docker exec smoke agent-run pitchfork list
-          docker exec smoke agent-run sh -c 'command -v code-server gh t3 && test -d ~/.oh-my-zsh'
-          docker exec smoke agent-run sh -c 'curl -sf -o /dev/null http://127.0.0.1:8080/healthz'
-          docker exec smoke sh -c 'command -v qrencode t3-pair'
-          # module packages come without recommends
-          docker exec smoke sh -c '! dpkg -s systemd > /dev/null 2>&1'
+          for tool in code-server gh t3; do docker exec smoke agent-run which "${tool}"; done
+          for tool in qrencode t3-pair; do docker exec smoke which "${tool}"; done
+          docker exec smoke agent-run test -d /home/agent/.oh-my-zsh
+          docker exec smoke agent-run curl -sf -o /dev/null http://127.0.0.1:8080/healthz
+          # module packages come without recommends (xauth is one of openssh-server)
+          if docker exec smoke dpkg -s xauth > /dev/null 2>&1; then
+            echo "apt installed recommended packages" >&2
+            exit 1
+          fi
       - name: Logs
         if: always()
         run: |

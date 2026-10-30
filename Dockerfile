@@ -30,7 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Packages from [bootstrap.packages] come without recommends; openssh-server
-# would otherwise pull in systemd and dbus
+# would otherwise pull in dbus, xauth and more
 RUN printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n' \
         > /etc/apt/apt.conf.d/99container-agent
 
