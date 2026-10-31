@@ -1,0 +1,13 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "python"
+description = "Python"
+version = "1.0.0"
+tags = ["runtime", "python"]
+
+# Read by mise itself, so it needs no PYTHON_ prefix
+[env.MISE_PYTHON_VERSION]
+description = "Version instead of latest, e.g. 3.13"
+
+[mise.tools]
+python = "latest"

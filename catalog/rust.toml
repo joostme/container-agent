@@ -1,0 +1,13 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "rust"
+description = "Rust with cargo, through rustup"
+version = "1.0.0"
+tags = ["runtime", "rust"]
+
+# Read by mise itself, so it needs no RUST_ prefix
+[env.MISE_RUST_VERSION]
+description = "Version instead of stable, e.g. 1.90"
+
+[mise.tools]
+rust = "stable"

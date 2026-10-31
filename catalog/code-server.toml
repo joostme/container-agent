@@ -1,0 +1,44 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "code-server"
+description = "VS Code in the browser (code-server), opens the workspace"
+version = "1.0.0"
+tags = ["editor", "web ui"]
+next_steps = ["Open code-server in the browser and sign in with CODE_SERVER_PASSWORD"]
+
+[env.CODE_SERVER_PORT]
+type = "port"
+protocol = "http"
+default = "8080"
+description = "Port of code-server"
+
+[env.CODE_SERVER_PASSWORD]
+type = "secret"
+description = "Login password. Empty turns auth off, so keep the port private then."
+
+[mise.tools]
+"github:coder/code-server" = "latest"
+
+# zsh as the default terminal. Not fatal: a settings.json with comments is no
+# valid JSON for jq.
+[mise.bootstrap.hooks.post-tools]
+run = '''
+f="$HOME/.local/share/code-server/User/settings.json"
+mkdir -p "$(dirname "$f")"
+[ -s "$f" ] || echo '{}' > "$f"
+jq '."terminal.integrated.defaultProfile.linux" = "zsh"
+    | ."terminal.integrated.profiles.linux".zsh = {"path": "/bin/zsh"}' "$f" > "$f.tmp" \
+    && mv "$f.tmp" "$f" \
+    || { rm -f "$f.tmp"; echo "code-server: could not update $f, leaving it as is"; }
+'''
+
+[daemons.code-server]
+run = '''
+auth=none
+[ -n "${CODE_SERVER_PASSWORD:-}" ] && auth=password
+PASSWORD="${CODE_SERVER_PASSWORD:-}" exec code-server \
+    --bind-addr "0.0.0.0:${CODE_SERVER_PORT}" --auth "${auth}" \
+    --disable-telemetry --disable-update-check "${AGENT_WORKSPACE}"
+'''
+retry = true
+ready_cmd = 'curl -sf -o /dev/null "http://127.0.0.1:${CODE_SERVER_PORT}/healthz"'

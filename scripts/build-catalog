@@ -1,0 +1,89 @@
+#!/bin/bash
+# Builds the published catalog from catalog/*.toml:
+#
+#   <out>/<name>/<version>.toml   the module file of that version, unchanged
+#   <out>/index.json              every module with the metadata of its newest
+#                                 version and, per version, format, sha256 and
+#                                 the date it was first committed
+#
+#   scripts/build-catalog [--history] <out>
+#
+# Without --history only the files in the working tree; with it also every
+# version a module ever had in the git history, so published pins never break.
+# A version is immutable: the first content of a version wins, a later one with
+# other content only warns (scripts/check-catalog stops that in CI).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+history=false
+[ "${1:-}" != --history ] || { history=true; shift; }
+out=${1:?usage: scripts/build-catalog [--history] <out>}
+mkdir -p "${out}"
+index="${out}/index.json"
+echo '{"format": 1, "modules": {}}' > "${index}"
+tmp=$(mktemp -d)
+trap 'rm -rf "${tmp}"' EXIT
+
+warn() { echo "warning: $*" >&2; }
+
+# add <file> <path in the repo> <date>
+add() {
+    local file=$1 path=$2 date=$3 module name version target sha
+    module=$(yq -p toml -o json '.' "${file}") || { warn "${path}: not valid TOML, skipped"; return 0; }
+    name=$(jq -r '.name // empty' <<< "${module}")
+    version=$(jq -r '.version // empty' <<< "${module}")
+    if [ "${name}" != "$(basename "${path}" .toml)" ] || [ -z "${version}" ]; then
+        warn "${path}: name ${name:-missing} or version ${version:-missing} does not fit, skipped"
+        return 0
+    fi
+    target="${out}/${name}/${version}.toml"
+    sha=$(sha256sum "${file}" | cut -d' ' -f1)
+    if [ -f "${target}" ]; then
+        [ "$(sha256sum "${target}" | cut -d' ' -f1)" = "${sha}" ] \
+            || warn "${path}: ${name} ${version} changed without a new version; the published file stays"
+        return 0
+    fi
+    mkdir -p "${out}/${name}"
+    cp "${file}" "${target}"
+    jq --arg name "${name}" --arg version "${version}" --arg sha "${sha}" --arg date "${date}" \
+        --argjson format "$(jq '.format' <<< "${module}")" '
+        .modules[$name].versions[$version] = {format: $format, sha256: $sha, date: $date}
+    ' "${index}" > "${index}.tmp"
+    mv "${index}.tmp" "${index}"
+}
+
+if [ "${history}" = true ]; then
+    declare -A seen=()
+    while read -r commit date; do
+        while read -r _ _ blob path; do
+            [[ "${path}" == catalog/*.toml ]] && [ -z "${seen[${blob}]:-}" ] || continue
+            seen[${blob}]=1
+            git cat-file blob "${blob}" > "${tmp}/module.toml"
+            add "${tmp}/module.toml" "${path}" "${date}"
+        done < <(git ls-tree "${commit}" catalog/)
+    done < <(git log --reverse --format='%H %cI' -- catalog/)
+fi
+for file in catalog/*.toml; do
+    add "${file}" "${file}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+done
+
+# Metadata of each module from its newest version
+for dir in "${out}"/*/; do
+    name=$(basename "${dir}")
+    newest=$(jq -r --arg n "${name}" '.modules[$n].versions // {} | keys[]' "${index}" | sort -V | tail -1)
+    [ -n "${newest}" ] || continue
+    jq --arg name "${name}" --argjson mod "$(yq -p toml -o json '.' "${dir}${newest}.toml")" '
+        .modules[$name] = {
+            description: $mod.description,
+            kind: (if ($mod.daemons // {}) == {} then "app" else "service" end),
+            tags: ($mod.tags // []),
+            author: ($mod.author // null),
+            homepage: ($mod.homepage // null),
+            requires: ($mod.requires // [])
+        } + {versions: .modules[$name].versions}
+    ' "${index}" > "${index}.tmp"
+    mv "${index}.tmp" "${index}"
+done
+jq -S '.' "${index}" > "${index}.tmp" && mv "${index}.tmp" "${index}"
+
+echo "${index}: $(jq '.modules | length' "${index}") modules, $(jq '[.modules[].versions | length] | add // 0' "${index}") versions"

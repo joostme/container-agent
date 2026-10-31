@@ -1,59 +1,83 @@
 <script lang="ts">
-	import type { Module } from '#lib/types.js';
+	import type { CatalogEntry, Module } from '#lib/types.js';
 	import Inline from './Inline.svelte';
 
 	interface Props {
-		module: Module;
+		name: string;
+		entry: CatalogEntry;
+		/** File of the shown version, once loaded. */
+		module: Module | undefined;
 		picked: boolean;
 		/** Modules that require this one; it is enabled through them. */
 		requiredBy: string[];
+		/** Versions the selected image reads, newest first. */
+		versions: string[];
+		/** The version in use, when enabled. */
+		version: string | null;
+		/** Replaced by a custom module of the same name. */
+		replaced: boolean;
 		onToggle: () => void;
+		onVersion: (version: string) => void;
 	}
 
-	let { module, picked, requiredBy, onToggle }: Props = $props();
+	let { name, entry, module, picked, requiredBy, versions, version, replaced, onToggle, onVersion }: Props = $props();
 
 	const enabled = $derived(picked || requiredBy.length > 0);
 	const locked = $derived(!picked && requiredBy.length > 0);
-	const ports = $derived(module.env.filter((v) => v.port).map((v) => `${v.default}/${v.port}`));
+	const ports = $derived(
+		(module?.env ?? []).filter((v) => v.type === 'port').map((v) => `${v.default}/${v.protocol ?? 'tcp'}`)
+	);
+	const secrets = $derived((module?.env ?? []).filter((v) => v.type === 'secret').map((v) => v.name));
 </script>
 
-<label class="card" class:enabled class:locked>
-	<input type="checkbox" checked={enabled} disabled={locked} onchange={onToggle} />
-	<div class="body">
-		<div class="head">
-			<span class="name">{module.name}</span>
-			{#if locked}
-				<span class="tag auto">needed by {requiredBy.join(', ')}</span>
-			{/if}
+<div class="card" class:enabled class:locked>
+	<label class="main">
+		<input type="checkbox" checked={enabled} disabled={locked || replaced} onchange={onToggle} />
+		<div class="body">
+			<div class="head">
+				<span class="name">{name}</span>
+				{#if locked}<span class="tag">needed by {requiredBy.join(', ')}</span>{/if}
+				{#if replaced}<span class="tag">replaced by your custom module</span>{/if}
+			</div>
+			<p><Inline text={entry.description} /></p>
 		</div>
-		<p><Inline text={module.description} /></p>
-		<div class="chips">
-			{#each module.requires as dep (dep)}
-				<span class="chip">needs {dep}</span>
-			{/each}
-			{#each ports as port (port)}
-				<span class="chip">port {port}</span>
-			{/each}
-			{#each module.commands as command (command)}
-				<span class="chip mono">{command}</span>
-			{/each}
-			{#if module.arch}
-				<span class="chip">only {module.arch.join(', ')}</span>
-			{/if}
-		</div>
+	</label>
+	<div class="chips">
+		{#each entry.tags as tag (tag)}<span class="chip tagchip">{tag}</span>{/each}
+		{#each entry.requires as dep (dep)}<span class="chip">needs {dep}</span>{/each}
+		{#each ports as port (port)}<span class="chip">port {port}</span>{/each}
+		{#each module?.commands ?? [] as command (command)}<span class="chip mono" title="command in the container">{command}</span>{/each}
+		{#each secrets as secret (secret)}<span class="chip" title="reads this secret">secret {secret}</span>{/each}
+		{#each module?.root ?? [] as part (part.what)}
+			<span class="chip root" title={part.run}>root: {part.what}</span>
+		{/each}
+		{#if module?.arch}<span class="chip">only {module.arch.join(', ')}</span>{/if}
 	</div>
-</label>
+	{#if enabled && version && !replaced}
+		<div class="version">
+			<select
+				aria-label="Version of {name}"
+				value={version}
+				onchange={(e) => onVersion(e.currentTarget.value)}
+			>
+				{#if !versions.includes(version)}<option value={version}>{version} (not for this image)</option>{/if}
+				{#each versions as v, i (v)}
+					<option value={v}>{v}{i === 0 ? ' (newest)' : ''}</option>
+				{/each}
+			</select>
+			{#if entry.homepage}<a href={entry.homepage} target="_blank" rel="noreferrer">homepage</a>{/if}
+		</div>
+	{/if}
+</div>
 
 <style>
 	.card {
-		display: flex;
-		gap: 0.7rem;
-		align-items: flex-start;
+		display: grid;
+		gap: 0.4rem;
 		padding: 0.8rem 0.9rem;
 		border: 1px solid var(--border);
 		border-radius: var(--radius);
 		background: var(--surface);
-		cursor: pointer;
 		transition:
 			border-color 0.15s,
 			background 0.15s;
@@ -65,7 +89,13 @@
 		border-color: var(--accent);
 		background: var(--accent-soft);
 	}
-	.card.locked {
+	.main {
+		display: flex;
+		gap: 0.7rem;
+		align-items: flex-start;
+		cursor: pointer;
+	}
+	.locked .main {
 		cursor: default;
 	}
 	input {
@@ -92,7 +122,7 @@
 		color: var(--muted);
 	}
 	p {
-		margin: 0.2rem 0 0.4rem;
+		margin: 0.2rem 0 0;
 		color: var(--muted);
 		font-size: 0.9rem;
 	}
@@ -110,5 +140,23 @@
 	}
 	.chip.mono {
 		font-family: var(--mono);
+	}
+	.chip.tagchip {
+		border: 1px solid var(--border);
+		background: none;
+	}
+	.chip.root {
+		background: var(--warn-bg);
+		color: var(--warn);
+	}
+	.version {
+		display: flex;
+		gap: 0.6rem;
+		align-items: center;
+		font-size: 0.85rem;
+	}
+	.version select {
+		width: auto;
+		padding: 0.2rem 0.4rem;
 	}
 </style>

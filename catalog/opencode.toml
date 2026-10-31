@@ -1,0 +1,29 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "opencode"
+description = "OpenCode server with its web UI"
+version = "1.0.0"
+tags = ["agent", "web ui"]
+requires = ["node"]
+next_steps = ["Open the OpenCode web UI and sign in as opencode with OPENCODE_SERVER_PASSWORD"]
+
+[env.OPENCODE_PORT]
+type = "port"
+protocol = "http"
+default = "4096"
+description = "Port of the OpenCode web UI and API"
+
+[env.OPENCODE_SERVER_PASSWORD]
+type = "secret"
+required = true
+description = "Password of the web UI and API; the user name is always opencode"
+
+[mise.tools]
+# OpenCode 2, from npm (@opencode/cli)
+opencode = "latest"
+
+[daemons.opencode]
+run = 'exec opencode serve --port "$OPENCODE_PORT" --hostname 0.0.0.0'
+retry = true
+# /api/info answers once the server is ready
+ready_cmd = 'curl -sf -o /dev/null -u "opencode:$OPENCODE_SERVER_PASSWORD" "http://127.0.0.1:$OPENCODE_PORT/api/info"'

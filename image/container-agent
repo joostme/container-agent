@@ -1,34 +1,32 @@
 #!/bin/bash
-# Sets up the agent user and the enabled modules, then hands over to
-# pitchfork, which runs the daemons of the modules.
+# Sets up the agent user and the modules in /etc/container-agent/agent.toml,
+# then hands over to pitchfork, which runs their daemons.
 #
 #   container-agent start     entrypoint, runs as root
 #   container-agent plan      print the resolved modules and generated config
-#   container-agent modules   list the available modules (services and apps)
-#   container-agent health    healthcheck: no daemon has failed
+#   container-agent modules   list the modules of the catalog
+#   container-agent health    healthcheck: every daemon runs
 set -euo pipefail
 
-AGENT_USER=${AGENT_USER:-agent}
-PUID=${PUID:-1000}
-PGID=${PGID:-1000}
-AGENT_HOME=${AGENT_HOME:-/home/${AGENT_USER}}
-AGENT_WORKSPACE=${AGENT_WORKSPACE:-/repos}
-AGENT_MODULES=${AGENT_MODULES:-}
-AUTO_UPDATE=${AUTO_UPDATE:-true}
-# Modules earlier in the path win: custom modules from compose.yaml (mounted
-# with configs:), then the user's in the home volume, then the built-in ones
-MODULE_PATH=${CONTAINER_AGENT_MODULE_PATH:-/etc/container-agent/custom:${AGENT_HOME}/.config/container-agent/modules:/etc/container-agent/modules}
+# Module formats this engine reads
+FORMATS="1"
+DEFAULT_CATALOG="https://joostme.github.io/container-agent/catalog"
+
+AGENT_USER=agent
+AGENT_HOME=/home/agent
+# Overridable for tests and `plan` outside a container
+CONFIG_DIR=${CONTAINER_AGENT_CONFIG:-/etc/container-agent}
+CACHE_DIR=${CONTAINER_AGENT_CACHE:-${AGENT_HOME}/.cache/container-agent/catalog}
 STATE_DIR=/run/container-agent
 MISE_CONF_D=/etc/mise/conf.d
 PITCHFORK_CONFIG=/etc/pitchfork/config.toml
 MARKER="# container-agent mise setup"
 
-export AGENT_USER PUID PGID AGENT_HOME AGENT_WORKSPACE
-
-declare -A MODULE_DIRS=() MARK=()
+declare -A SPEC=() FILE=() SOURCE=() MARK=() TYPE_OF=()
 ENABLED=()
 ORDER=()
-EXPORTED_VARS=(AGENT_USER PUID PGID AGENT_HOME AGENT_WORKSPACE BASH_ENV)
+EXPORTED_VARS=(AGENT_HOME AGENT_WORKSPACE PUID PGID BASH_ENV)
+INDEX=""
 
 log() { echo "[container-agent] $*"; }
 die() { echo "[container-agent] error: $*" >&2; exit 1; }
@@ -39,33 +37,138 @@ as_agent() {
         "$@")
 }
 
+toml_json() { yq -p toml -o json '.' "$1"; }
+
+# ---------------------------------------------------------------------------
+# agent.toml
+# ---------------------------------------------------------------------------
+read_config() {
+    local file="${CONFIG_DIR}/agent.toml" unknown format
+    [ -f "${file}" ] || die "${file} not found; mount a folder with agent.toml at ${CONFIG_DIR}"
+    CONFIG=$(toml_json "${file}") || die "${file} is not valid TOML"
+
+    format=$(jq -r '.format // empty' <<< "${CONFIG}")
+    grep -qx "${format:-none}" <<< "${FORMATS// /$'\n'}" \
+        || die "agent.toml has format ${format:-none}; this image reads format ${FORMATS}"
+    unknown=$(jq -r 'keys - ["format","puid","pgid","workspace","auto_update","catalog","modules","env"] | join(", ")' <<< "${CONFIG}")
+    [ -z "${unknown}" ] || die "agent.toml: unknown field ${unknown}"
+
+    # The container environment wins over agent.toml
+    PUID=${PUID:-$(jq -r '.puid // 1000' <<< "${CONFIG}")}
+    PGID=${PGID:-$(jq -r '.pgid // 1000' <<< "${CONFIG}")}
+    AGENT_WORKSPACE=$(jq -r '.workspace // "/repos"' <<< "${CONFIG}")
+    AUTO_UPDATE=$(jq -r 'if .auto_update == false then "false" else "true" end' <<< "${CONFIG}")
+    CATALOG=$(jq -r --arg d "${DEFAULT_CATALOG}" '.catalog // $d' <<< "${CONFIG}")
+    CATALOG=${CATALOG%/}
+    export AGENT_HOME AGENT_WORKSPACE PUID PGID
+}
+
+# ---------------------------------------------------------------------------
+# Catalog
+# ---------------------------------------------------------------------------
+# Copies a catalog file: from a URL or, for tests and local catalogs, a path
+fetch() {
+    case "${CATALOG}" in
+        http://* | https://*) curl -fsSL --retry 3 "${CATALOG}/$1" -o "$2" ;;
+        *) cp "${CATALOG#file://}/$1" "$2" ;;
+    esac
+}
+
+load_index() {
+    [ -z "${INDEX}" ] || return 0
+    mkdir -p "${CACHE_DIR}"
+    if fetch index.json "${CACHE_DIR}/index.json.tmp" 2> /dev/null; then
+        mv "${CACHE_DIR}/index.json.tmp" "${CACHE_DIR}/index.json"
+    elif [ -f "${CACHE_DIR}/index.json" ]; then
+        log "warning: catalog ${CATALOG} not reachable, using the cached index"
+    else
+        rm -f "${CACHE_DIR}/index.json.tmp"
+        die "catalog ${CATALOG} not reachable and no cached index"
+    fi
+    INDEX=$(cat "${CACHE_DIR}/index.json")
+}
+
+# Newest version of a module whose format this engine reads
+latest_version() {
+    local version
+    load_index
+    version=$(jq -r --arg n "$1" --arg f "${FORMATS}" '
+        .modules[$n].versions // {} | to_entries[]
+        | select(.value.format | tostring | IN($f | split(" ")[])) | .key' <<< "${INDEX}" | sort -V | tail -1)
+    [ -n "${version}" ] || die "module $1 is not in the catalog ${CATALOG}, or has no version for format ${FORMATS}"
+    echo "${version}"
+}
+
+# The module file of a catalog version, from the cache or downloaded and checked
+catalog_file() {
+    local name=$1 version=$2 file="${CACHE_DIR}/$1/$2.toml" sha
+    if [ ! -f "${file}" ]; then
+        load_index
+        sha=$(jq -r --arg n "${name}" --arg v "${version}" '.modules[$n].versions[$v].sha256 // empty' <<< "${INDEX}")
+        [ -n "${sha}" ] || die "module ${name} ${version} is not in the catalog ${CATALOG}"
+        mkdir -p "$(dirname "${file}")"
+        fetch "${name}/${version}.toml" "${file}.tmp" || die "could not download ${name} ${version} from ${CATALOG}"
+        [ "$(sha256sum "${file}.tmp" | cut -d' ' -f1)" = "${sha}" ] \
+            || { rm -f "${file}.tmp"; die "${name} ${version} does not match the checksum in the catalog index"; }
+        mv "${file}.tmp" "${file}"
+    fi
+    echo "${file}"
+}
+
 # ---------------------------------------------------------------------------
 # Modules
 # ---------------------------------------------------------------------------
-find_module() {
-    local dir IFS=:
-    for dir in ${MODULE_PATH}; do
-        if [ -f "${dir}/$1/module.toml" ]; then
-            echo "${dir}/$1"
-            return 0
-        fi
-    done
-    return 1
+# Fail loud on what this engine does not know, instead of ignoring it
+validate_module() {
+    local name=$1 file=$2 json problems
+    json=$(toml_json "${file}") || die "module ${name}: ${file} is not valid TOML"
+    problems=$(jq -r --arg name "${name}" --arg f "${FORMATS}" '
+        def unknown($allowed): keys - $allowed;
+        [
+          (if (.format | tostring | IN($f | split(" ")[])) then empty
+           else "uses format \(.format // "none"); this image reads format \($f)" end),
+          (if .name == $name then empty else "its name is \(.name // "missing"), not \($name)" end),
+          (unknown(["format","name","description","version","tags","author","homepage",
+                    "requires","after","arch","next_steps","env","mise","daemons"])[] | "unknown field \(.)"),
+          ((.mise // {}) | unknown(["tools","tasks","bootstrap"])[] | "mise.\(.) is not allowed"),
+          ((.mise.bootstrap // {}) | unknown(["packages","hooks"])[] | "mise.bootstrap.\(.) is not allowed"),
+          ((.mise.bootstrap.hooks // {}) | unknown(["post-packages","post-tools"])[] | "hook \(.) is not allowed"),
+          ((.mise.bootstrap.packages // {}) | keys[] | select(startswith("apt:") | not) | "package \(.) is not an apt package"),
+          ((.env // {}) | to_entries[] | .key as $v | .value | (
+              (unknown(["type","default","required","choices","protocol","description"])[] | "\($v): unknown field \(.)"),
+              (if (.type // "string") | IN("string","secret","port","bool","choice","path") then empty
+               else "\($v): unknown type \(.type)" end)))
+        ] | .[]' <<< "${json}")
+    [ -z "${problems}" ] || die "module ${name} (${SOURCE[${name}]}):"$'\n'"${problems//$'\n'/$'\n'  }"
 }
 
-# Items of a list in module.toml, one per line
-module_list() {
-    yq -p toml -o yaml "(.$2 // [])[]" "$1/module.toml"
-}
-
+# Resolves a module to its file, recursing into what it requires
 add_module() {
-    local name=$1 dir dep
-    [ -n "${MODULE_DIRS[${name}]:-}" ] && return 0
-    dir=$(find_module "${name}") || die "unknown module '${name}' (searched ${MODULE_PATH})"
-    MODULE_DIRS[${name}]=${dir}
+    local name=$1 spec=$2 dep version
+    [ -z "${FILE[${name}]:-}" ] || return 0
+    case "${spec}" in
+        local)
+            FILE[${name}]="${CONFIG_DIR}/modules/${name}.toml"
+            [ -f "${FILE[${name}]}" ] || die "module ${name} is local, but ${FILE[${name}]} does not exist"
+            SOURCE[${name}]=local
+            ;;
+        *)
+            version=${spec}
+            [ "${version}" != latest ] || version=$(latest_version "${name}")
+            FILE[${name}]=$(catalog_file "${name}" "${version}")
+            SOURCE[${name}]="catalog ${version}"
+            ;;
+    esac
+    validate_module "${name}" "${FILE[${name}]}"
     ENABLED+=("${name}")
-    for dep in $(module_list "${dir}" requires); do
-        add_module "${dep}"
+    for dep in $(yq -p toml -o yaml '(.requires // [])[]' "${FILE[${name}]}"); do
+        if [ -n "${SPEC[${dep}]:-}" ]; then
+            add_module "${dep}" "${SPEC[${dep}]}"
+        elif [ -f "${CONFIG_DIR}/modules/${dep}.toml" ]; then
+            add_module "${dep}" local
+        else
+            add_module "${dep}" latest
+        fi
     done
 }
 
@@ -74,12 +177,11 @@ visit() {
     local name=$1 dep
     case "${MARK[${name}]:-}" in
         visited) return 0 ;;
-        visiting) die "module '${name}' depends on itself (requires/after cycle)" ;;
+        visiting) die "module ${name} depends on itself (requires/after cycle)" ;;
     esac
     MARK[${name}]=visiting
-    for dep in $(module_list "${MODULE_DIRS[${name}]}" requires) \
-               $(module_list "${MODULE_DIRS[${name}]}" after); do
-        if [ -n "${MODULE_DIRS[${dep}]:-}" ]; then
+    for dep in $(yq -p toml -o yaml '((.requires // []) + (.after // []))[]' "${FILE[${name}]}"); do
+        if [ -n "${FILE[${dep}]:-}" ]; then
             visit "${dep}"
         fi
     done
@@ -88,72 +190,120 @@ visit() {
 }
 
 resolve_modules() {
-    local name
-    for name in ${AGENT_MODULES//,/ }; do
-        add_module "${name}"
+    local name spec
+    while IFS=$'\t' read -r name spec; do
+        [ -n "${name}" ] && SPEC[${name}]=${spec}
+    done < <(jq -r '(.modules // {}) | to_entries[] | [.key, .value] | @tsv' <<< "${CONFIG}")
+    for name in "${!SPEC[@]}"; do
+        add_module "${name}" "${SPEC[${name}]}"
     done
-    for name in "${ENABLED[@]}"; do
-        visit "${name}"
-    done
-    [ "${#ORDER[@]}" -gt 0 ] || log "warning: AGENT_MODULES is empty, no module enabled"
+    # deterministic: modules in alphabetical order, then by their dependencies
+    while read -r name; do
+        [ -n "${name}" ] && visit "${name}"
+    done < <(printf '%s\n' "${ENABLED[@]}" | sort)
+    [ "${#ORDER[@]}" -gt 0 ] || log "warning: agent.toml enables no module"
 }
 
 check_arch() {
     local arch name supported
     arch=$(dpkg --print-architecture 2>/dev/null || uname -m)
     for name in "${ORDER[@]}"; do
-        supported=$(module_list "${MODULE_DIRS[${name}]}" arch)
+        supported=$(yq -p toml -o yaml '(.arch // [])[]' "${FILE[${name}]}")
         if [ -n "${supported}" ] && ! grep -qx "${arch}" <<< "${supported}"; then
-            die "module '${name}' does not support ${arch}"
+            die "module ${name} does not support ${arch}"
         fi
     done
 }
 
-# Set the defaults of module variables that the container environment leaves
-# empty, and stop on required variables without a value
-apply_env_defaults() {
-    local name var default required
+# Values: container environment, then [env] of agent.toml, then the default.
+# Secrets only from the environment.
+apply_env() {
+    local name var type default required configured
     for name in "${ORDER[@]}"; do
-        # \x1f, not a tab: read merges runs of whitespace separators, so an
-        # empty default would shift the columns
-        while IFS=$'\x1f' read -r var default required; do
+        while IFS=$'\x1f' read -r var type default required; do
             [ -n "${var}" ] || continue
-            if [ -z "${!var:-}" ] && [ -n "${default}" ]; then
-                export "${var}=${default}"
+            TYPE_OF[${var}]=${type}
+            configured=$(jq -r --arg v "${var}" '.env[$v] // empty | tostring' <<< "${CONFIG}")
+            if [ "${type}" = secret ] && [ -n "${configured}" ]; then
+                die "${var} is a secret of module ${name}: set it in the container environment (.env), not in agent.toml"
+            fi
+            if [ -z "${!var:-}" ]; then
+                if [ -n "${configured}" ]; then
+                    export "${var}=${configured}"
+                elif [ -n "${default}" ]; then
+                    export "${var}=${default}"
+                fi
             fi
             if [ "${required}" = true ] && [ -z "${!var:-}" ]; then
-                die "${var} is required by module '${name}'"
+                die "${var} is required by module ${name}"
             fi
             EXPORTED_VARS+=("${var}")
-        done < <(yq -p toml -o json '.env // {}' "${MODULE_DIRS[${name}]}/module.toml" \
-            | jq -r 'to_entries[] | [.key, (.value.default // ""), (.value.required // false | tostring)] | join("\u001f")')
+        done < <(yq -p toml -o json '.env // {}' "${FILE[${name}]}" \
+            | jq -r 'to_entries[] | [.key, (.value.type // "string"), (.value.default // ""), (.value.required // false | tostring)] | join("\u001f")')
+    done
+    # [env] entries no module declares still reach the container
+    while IFS=$'\x1f' read -r var configured; do
+        [ -n "${var}" ] || continue
+        [ -n "${TYPE_OF[${var}]:-}" ] && continue
+        log "warning: ${var} in agent.toml is not a variable of any enabled module"
+        [ -n "${!var:-}" ] || export "${var}=${configured}"
+        EXPORTED_VARS+=("${var}")
+    done < <(jq -r '(.env // {}) | to_entries[] | [.key, (.value | tostring)] | join("\u001f")' <<< "${CONFIG}")
+}
+
+# [mise] of each module, in setup order: the number keeps their hooks in order
+mise_configs() {
+    local i=100 name
+    for name in "${ORDER[@]}"; do
+        if [ "$(yq -p toml -o yaml '.mise // {} | length' "${FILE[${name}]}")" -gt 0 ]; then
+            printf '%s\t%s\n' "${i}-${name}.toml" "${name}"
+            i=$((i + 1))
+        fi
     done
 }
 
-# pitchfork config from the [daemons] of all enabled modules. Daemons start on
-# boot and in the workspace unless the module says otherwise.
+mise_config_of() { yq -p toml -o toml '.mise' "${FILE[$1]}"; }
+
+# Tasks of all modules; each becomes a command
+tasks() {
+    local name task
+    declare -A owner=()
+    for name in "${ORDER[@]}"; do
+        for task in $(yq -p toml -o yaml '(.mise.tasks // {}) | keys | .[]' "${FILE[${name}]}"); do
+            [ -z "${owner[${task}]:-}" ] || die "task ${task} is defined by ${owner[${task}]} and ${name}"
+            owner[${task}]=${name}
+            echo "${task}"
+        done
+    done
+}
+
+# pitchfork config from the [daemons] of all modules, with the image's defaults
 pitchfork_config() {
-    local name file
-    echo "# Generated by container-agent on every start. Change the modules instead."
-    echo "# Your own daemons go into ~/.config/pitchfork/config.toml."
+    local name daemon
+    declare -A owner=()
+    echo "# Generated by container-agent on every start from the modules in agent.toml."
     echo
     echo "[settings.general]"
-    echo "# run daemons with the mise tools and environment of the agent user"
+    echo "# run daemons with the mise tools and environment of all modules"
     echo "mise = true"
     echo
     echo "[settings.supervisor]"
     echo "# the container runs the one supervisor; CLI calls must not start another"
     echo "auto_start = false"
     for name in "${ORDER[@]}"; do
-        file=${MODULE_DIRS[${name}]}/module.toml
-        [ "$(yq -p toml -o yaml '.daemons // {} | length' "${file}")" -gt 0 ] || continue
+        for daemon in $(yq -p toml -o yaml '(.daemons // {}) | keys | .[]' "${FILE[${name}]}"); do
+            [ -z "${owner[${daemon}]:-}" ] || die "daemon ${daemon} is defined by ${owner[${daemon}]} and ${name}"
+            owner[${daemon}]=${name}
+        done
+        [ "$(yq -p toml -o yaml '.daemons // {} | length' "${FILE[${name}]}")" -gt 0 ] || continue
         echo
         echo "# module ${name}"
         WORKSPACE="${AGENT_WORKSPACE}" yq -p toml -o toml '
             {"daemons": .daemons}
             | with(.daemons[]; select(has("boot_start") | not) | .boot_start = true)
             | with(.daemons[]; select(has("dir") | not) | .dir = strenv(WORKSPACE))
-        ' "${file}"
+            | with(.daemons[]; select((has("mise") | not) and .user == "root") | .mise = false)
+        ' "${FILE[${name}]}"
     done
 }
 
@@ -162,19 +312,17 @@ pitchfork_config() {
 # ---------------------------------------------------------------------------
 setup_user() {
     local existing
-    [ "${PUID}" != 0 ] || die "PUID=0 is not supported, the agent must not run as root"
-
-    if getent group "${PGID}" > /dev/null; then
-        :
-    elif getent group "${AGENT_USER}" > /dev/null; then
-        groupmod -g "${PGID}" "${AGENT_USER}"
-    else
-        groupadd -g "${PGID}" "${AGENT_USER}"
+    [ "${PUID}" != 0 ] || die "PUID 0 is not supported, the agent must not run as root"
+    if ! getent group "${PGID}" > /dev/null; then
+        if getent group "${AGENT_USER}" > /dev/null; then
+            groupmod -g "${PGID}" "${AGENT_USER}"
+        else
+            groupadd -g "${PGID}" "${AGENT_USER}"
+        fi
     fi
-
     existing=$(getent passwd "${PUID}" | cut -d: -f1 || true)
     if [ -n "${existing}" ] && [ "${existing}" != "${AGENT_USER}" ]; then
-        die "UID ${PUID} already belongs to '${existing}' in the image, pick another PUID"
+        die "UID ${PUID} already belongs to ${existing} in the image, pick another PUID"
     elif id "${AGENT_USER}" > /dev/null 2>&1; then
         usermod -u "${PUID}" "${AGENT_USER}"
     else
@@ -200,7 +348,7 @@ setup_home() {
         mkdir -p "${dir}"
         chown "${PUID}:${PGID}" "${dir}"
     done
-    # Files root left behind in earlier runs would break installs as the user.
+    # Files root left behind (e.g. the catalog cache) would break the user.
     # Only root-owned ones: bind mounts from the host keep their owner.
     find "${AGENT_HOME}" -path "${AGENT_HOME}/.ssh-keys" -prune -o -user 0 -print0 \
         | xargs -0r chown -h "${PUID}:${PGID}"
@@ -223,7 +371,7 @@ setup_home() {
 
     # Interactive shells activate mise. Non-interactive ones (the shell tools of
     # agents, `bash -c`) never reach a prompt, so they load the container and
-    # mise environment on every start; this also picks up mise config changes.
+    # mise environment on every start.
     local env_line=". ${STATE_DIR}/env 2>/dev/null || true"
     append_block "${AGENT_HOME}/.zshenv" "${env_line}"$'\n''eval "$(mise env -s zsh 2>/dev/null)"'
     append_block "${AGENT_HOME}/.bash_env" "${env_line}"$'\n''eval "$(mise env -s bash 2>/dev/null)"'
@@ -232,9 +380,9 @@ setup_home() {
     append_block "${AGENT_HOME}/.profile" "${env_line}"$'\n''eval "$(mise activate bash --shims)"'
 }
 
-# Runtime state for agent-run, shells and `docker exec`
+# Runtime state for agent-run, shells, commands and `docker exec`
 write_state() {
-    local name var file
+    local var task
     rm -rf "${STATE_DIR}"
     mkdir -p "${STATE_DIR}/bin"
     for var in "${EXPORTED_VARS[@]}"; do
@@ -247,38 +395,32 @@ write_state() {
     chmod 640 "${STATE_DIR}/env"
 
     ln -s "${AGENT_HOME}/.local/share/mise/shims" "${STATE_DIR}/shims"
-    for name in "${ORDER[@]}"; do
-        for file in "${MODULE_DIRS[${name}]}/bin/"*; do
-            [ -f "${file}" ] && ln -sf "${file}" "${STATE_DIR}/bin/"
-        done
+    for task in $(tasks); do
+        printf '#!/bin/sh\n# mise task %s of a module\nexec agent-run mise run -q %s -- "$@"\n' \
+            "${task}" "${task}" > "${STATE_DIR}/bin/${task}"
+        chmod 755 "${STATE_DIR}/bin/${task}"
     done
 }
 
-# Copies, not links: mise trusts files in /etc/mise, but would ask about
-# links that point into the home directory. The number keeps the order of
-# their bootstrap hooks.
+# Copies, not links: mise trusts files in /etc/mise
 install_mise_configs() {
-    local i=100 name
+    local file name
     rm -rf "${MISE_CONF_D}"
     mkdir -p "${MISE_CONF_D}"
-    for name in "${ORDER[@]}"; do
-        if [ -f "${MODULE_DIRS[${name}]}/mise.toml" ]; then
-            cp "${MODULE_DIRS[${name}]}/mise.toml" "${MISE_CONF_D}/${i}-${name}.toml"
-            i=$((i + 1))
-        fi
-    done
+    while IFS=$'\t' read -r file name; do
+        [ -n "${file}" ] && mise_config_of "${name}" > "${MISE_CONF_D}/${file}"
+    done < <(mise_configs)
 }
 
 # Root part (apt packages and their post-packages hooks), then the rest as
-# the agent user (tools and the post-tools/final hooks). Root reads the
-# user's mise config too, so packages declared there get installed.
+# the agent user (tools and post-tools hooks)
 run_bootstrap() {
-    local update=() user_config="${AGENT_HOME}/.config/mise"
-    if ! MISE_CONFIG_DIR="${user_config}" mise bootstrap packages status --missing > /dev/null 2>&1; then
+    local update=()
+    if ! HOME=/root mise bootstrap packages status --missing > /dev/null 2>&1; then
         update=(--update)
     fi
     log "Installing packages..."
-    DEBIAN_FRONTEND=noninteractive MISE_CONFIG_DIR="${user_config}" HOME=/root BASH_ENV='' \
+    DEBIAN_FRONTEND=noninteractive HOME=/root BASH_ENV='' \
         mise bootstrap --only packages --yes "${update[@]}"
 
     log "Installing tools..."
@@ -291,13 +433,14 @@ run_bootstrap() {
 
 start() {
     [ "$(id -u)" = 0 ] || die "start must run as root"
-    log "Starting (user ${AGENT_USER}, uid ${PUID}, gid ${PGID})"
+    read_config
+    log "Starting (uid ${PUID}, gid ${PGID}, catalog ${CATALOG})"
     setup_user
     resolve_modules
     check_arch
-    log "Modules: ${ORDER[*]:-none}"
+    log "Modules: $(for n in "${ORDER[@]}"; do printf '%s (%s) ' "${n}" "${SOURCE[${n}]}"; done)"
     export BASH_ENV="${AGENT_HOME}/.bash_env"
-    apply_env_defaults
+    apply_env
     write_state
     install_mise_configs
     setup_home
@@ -316,38 +459,44 @@ start() {
 # Other commands
 # ---------------------------------------------------------------------------
 plan() {
-    local name var
+    local name var file
+    read_config
     resolve_modules
-    apply_env_defaults
+    apply_env
     echo "# Modules in setup order"
     for name in "${ORDER[@]}"; do
-        printf '%-16s %s\n' "${name}" "${MODULE_DIRS[${name}]}"
+        printf '%-16s %s\n' "${name}" "${SOURCE[${name}]}"
     done
     echo
     echo "# Environment"
     for var in "${EXPORTED_VARS[@]}"; do
-        printf '%s=%s\n' "${var}" "${!var:-}"
+        if [ "${TYPE_OF[${var}]:-}" = secret ] && [ -n "${!var:-}" ]; then
+            printf '%s=***\n' "${var}"
+        else
+            printf '%s=%s\n' "${var}" "${!var:-}"
+        fi
     done
+    echo
+    echo "# Commands"
+    tasks
+    while IFS=$'\t' read -r file name; do
+        [ -n "${file}" ] || continue
+        echo
+        echo "# ${MISE_CONF_D}/${file}"
+        mise_config_of "${name}"
+    done < <(mise_configs)
     echo
     echo "# ${PITCHFORK_CONFIG}"
     pitchfork_config
 }
 
-# Modules with daemons are services, the others apps
 modules() {
-    local dir file name kind IFS=:
-    declare -A seen=()
-    for dir in ${MODULE_PATH}; do
-        for file in "${dir}"/*/module.toml; do
-            [ -f "${file}" ] || continue
-            name=$(basename "$(dirname "${file}")")
-            [ -z "${seen[${name}]:-}" ] || continue
-            seen[${name}]=1
-            kind=app
-            [ "$(yq -p toml -o yaml '.daemons // {} | length' "${file}")" -gt 0 ] && kind=service
-            printf '%-16s %-8s %s\n' "${name}" "${kind}" "$(yq -p toml -o yaml '.description' "${file}")"
-        done
-    done | sort
+    CATALOG=${CATALOG:-${DEFAULT_CATALOG}}
+    [ ! -f "${CONFIG_DIR}/agent.toml" ] || read_config
+    load_index
+    jq -r '.modules | to_entries[] | [.key, .value.kind,
+        (.value.versions | keys | sort_by(split(".") | map(tonumber? // 0)) | last), .value.description] | @tsv' <<< "${INDEX}" \
+        | sort | awk -F'\t' '{ printf "%-16s %-8s %-8s %s\n", $1, $2, $3, $4 }'
 }
 
 # Healthy once setup has finished and every daemon that starts on boot runs.
@@ -355,6 +504,7 @@ modules() {
 # its own when there is none yet.
 health() {
     local list down
+    PUID=$(id -u "${AGENT_USER}") PGID=$(id -g "${AGENT_USER}")
     # pitchfork keeps its socket in the agent user's home
     list=$(as_agent PITCHFORK_SUPERVISOR_AUTO_START=false pitchfork list --json 2> /dev/null) \
         || { echo "pitchfork supervisor is not running yet (setup in progress?)"; exit 1; }

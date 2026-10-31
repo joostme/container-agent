@@ -1,2 +1,0 @@
-description = "test: cycle with cycle-a"
-after = ["cycle-a"]

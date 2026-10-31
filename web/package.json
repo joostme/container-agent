@@ -4,19 +4,21 @@
 	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
-		"registry": "node scripts/build-registry.js",
-		"dev": "npm run registry && vite dev",
-		"build": "npm run registry && vite build",
+		"dev": "npm run prepare-data && vite dev",
+		"build": "npm run prepare-data && vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
-		"check": "npm run registry && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"test": "npm run registry && vitest --run"
+		"check": "npm run prepare-data && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"test": "npm run prepare-data && vitest --run",
+		"prepare-data": "node scripts/prepare.js"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-static": "^4.0.0",
 		"@sveltejs/kit": "^3.0.0",
 		"@sveltejs/vite-plugin-svelte": "^7.2.0",
 		"@types/node": "^26.6.6",
+		"fflate": "^0.8.3",
+		"jsdom": "^30.1.3",
 		"smol-toml": "^1.9.1",
 		"svelte": "^5.57.1",
 		"svelte-check": "^4.6.0",
@@ -28,5 +30,5 @@
 	"imports": {
 		"#lib/*": "./src/lib/*"
 	},
-	"description": "Static configurator that turns picked container-agent modules into compose.yaml"
+	"description": "Static configurator that turns catalog and custom modules into agent.toml and compose.yaml"
 }

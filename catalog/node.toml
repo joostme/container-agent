@@ -1,0 +1,13 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "node"
+description = "Node.js with npm; needed by agents that ship as npm packages"
+version = "1.0.0"
+tags = ["runtime", "javascript"]
+
+# Read by mise itself, so it needs no NODE_ prefix
+[env.MISE_NODE_VERSION]
+description = "Version instead of lts, e.g. 22"
+
+[mise.tools]
+node = "lts"

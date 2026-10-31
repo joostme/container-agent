@@ -1,0 +1,42 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "sshd"
+description = "SSH server for the agent user (key login only), e.g. for Remote-SSH from VS Code or Cursor"
+version = "1.0.0"
+tags = ["remote access", "ssh"]
+next_steps = ["Add your public key to ~/.ssh/authorized_keys, e.g. through the SSH key mount, then connect as agent"]
+
+[env.SSHD_PORT]
+type = "port"
+protocol = "tcp"
+default = "22"
+description = "Port of the SSH server"
+
+[mise.bootstrap.packages]
+"apt:openssh-server" = "latest"
+
+# Runs as root. The host key lives in the home volume, so clients do not see a
+# new host key after the container is recreated.
+[mise.bootstrap.hooks.post-packages]
+run = '''
+set -e
+keys="$AGENT_HOME/.local/state/sshd"
+mkdir -p "$keys" /run/sshd
+[ -f "$keys/ssh_host_ed25519_key" ] || ssh-keygen -q -t ed25519 -N '' -f "$keys/ssh_host_ed25519_key"
+cat > /etc/ssh/sshd_config.d/container-agent.conf <<EOF
+Port $SSHD_PORT
+HostKey $keys/ssh_host_ed25519_key
+AllowUsers agent
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+X11Forwarding no
+PrintMotd no
+EOF
+'''
+
+[daemons.sshd]
+run = "exec /usr/sbin/sshd -D -e"
+user = "root"
+mise = false
+retry = true

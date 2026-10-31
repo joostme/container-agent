@@ -1,12 +1,18 @@
 #!/bin/bash
-# The module schema links the daemon schema of the pitchfork version in the
-# image; both must name the same version.
+# The module schema links the mise and pitchfork schemas of the versions the
+# image pins; the links and the Dockerfile must name the same versions.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-image=$(sed -n 's/^ARG PITCHFORK_VERSION=//p' Dockerfile)
-schema=$(grep -o 'jdx/pitchfork/v[0-9.]*/' schema/module.schema.json | sed 's|jdx/pitchfork/v||; s|/$||')
-if [ "${image}" != "${schema}" ]; then
-    echo "pitchfork ${image} in the Dockerfile, but schema/module.schema.json links ${schema}" >&2
-    exit 1
-fi
+schema=schema/v1/module.schema.json
+failed=0
+for tool in mise pitchfork; do
+    var=$(tr '[:lower:]' '[:upper:]' <<< "${tool}")_VERSION
+    image=$(sed -n "s/^ARG ${var}=//p" Dockerfile)
+    linked=$(grep -o "jdx/${tool}/v[0-9.]*/" "${schema}" | sed "s|jdx/${tool}/v||; s|/$||" | sort -u)
+    if [ "${image}" != "${linked}" ]; then
+        echo "${tool} ${image} in the Dockerfile, but ${schema} links ${linked:-none}" >&2
+        failed=1
+    fi
+done
+exit "${failed}"

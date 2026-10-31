@@ -1,0 +1,30 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "codex-remote"
+description = "Codex Remote Control: sessions in the ChatGPT app, listed under the container's host name"
+version = "1.0.0"
+tags = ["remote control", "openai"]
+requires = ["codex"]
+next_steps = ["Pair the ChatGPT app: `codex-remote-pair`, then enter the code in the app"]
+
+[mise.tasks.codex-remote-pair]
+description = "Short-lived pairing code for the ChatGPT app"
+run = "codex remote-control pair"
+
+# Finishes once Codex is logged in (`agent-run codex login --device-auth`)
+[daemons.codex-remote-login]
+run = '''
+codex login status > /dev/null 2>&1 || echo "Waiting for a Codex login: agent-run codex login --device-auth"
+until codex login status > /dev/null 2>&1; do sleep 30; done
+'''
+oneshot = true
+
+# The foreground server: the background daemon of `codex remote-control start`
+# is unreliable in containers. The sleep spaces out restarts.
+[daemons.codex-remote]
+run = '''
+codex remote-control --no-daemon \
+    || { echo "codex remote-control exited, retrying in 30s"; sleep 30; exit 1; }
+'''
+depends = ["codex-remote-login"]
+retry = true

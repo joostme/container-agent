@@ -1,20 +1,22 @@
 <script lang="ts">
 	import type { Output } from '#lib/generate.js';
+	import { zip } from '#lib/share.js';
 
 	interface Props {
 		output: Output;
+		/** Folder name inside the zip. */
+		folder: string;
 	}
 
-	let { output }: Props = $props();
+	let { output, folder }: Props = $props();
 
-	type Tab = 'compose' | 'env' | 'steps';
-	let tab = $state<Tab>('compose');
+	let tab = $state('compose.yaml');
 	let copied = $state<string | null>(null);
 
-	const files: Record<Exclude<Tab, 'steps'>, { name: string; text: () => string }> = {
-		compose: { name: 'compose.yaml', text: () => output.compose },
-		env: { name: '.env', text: () => output.env }
-	};
+	const file = $derived(output.files.find((f) => f.path === tab));
+	$effect(() => {
+		if (tab !== 'steps' && !file) tab = 'compose.yaml';
+	});
 
 	async function copy(text: string, what: string) {
 		await navigator.clipboard.writeText(text);
@@ -22,34 +24,36 @@
 		setTimeout(() => (copied = null), 1500);
 	}
 
-	function download(name: string, text: string) {
-		const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+	function save(name: string, data: BlobPart, type: string) {
+		const url = URL.createObjectURL(new Blob([data], { type }));
 		const link = Object.assign(document.createElement('a'), { href: url, download: name });
 		link.click();
 		URL.revokeObjectURL(url);
 	}
+
+	const label = (path: string) => path.replace(/^config\//, '');
 </script>
 
 <div class="panel">
-	{#if output.warnings.length}
-		<ul class="warnings" aria-live="polite">
-			{#each output.warnings as warning (warning)}
-				<li>{warning}</li>
-			{/each}
-		</ul>
-	{/if}
+	<div class="actions">
+		<button class="primary" onclick={() => save(`${folder}.zip`, zip(output.files, folder) as BlobPart, 'application/zip')}>
+			Download all (.zip)
+		</button>
+		<span>{output.files.map((f) => f.path).join(', ')}</span>
+	</div>
 
 	<div class="tabs" role="tablist">
-		<button role="tab" aria-selected={tab === 'compose'} onclick={() => (tab = 'compose')}>compose.yaml</button>
-		<button role="tab" aria-selected={tab === 'env'} onclick={() => (tab = 'env')}>.env</button>
+		{#each output.files as f (f.path)}
+			<button role="tab" aria-selected={tab === f.path} onclick={() => (tab = f.path)}>{label(f.path)}</button>
+		{/each}
 		<button role="tab" aria-selected={tab === 'steps'} onclick={() => (tab = 'steps')}>Next steps</button>
 	</div>
 
 	{#if tab === 'steps'}
 		<ol class="steps">
-			{#each output.steps as step (step.text)}
+			{#each output.steps as step, i (i)}
 				<li>
-					{#each step.parts as part, i (i)}
+					{#each step.parts as part, j (j)}
 						{#if part.command}
 							<button class="command" title="Copy" onclick={() => copy(part.text, part.text)}>
 								<code>{part.text}</code>
@@ -60,15 +64,13 @@
 				</li>
 			{/each}
 		</ol>
-	{:else}
-		{@const file = files[tab]}
+	{:else if file}
 		<div class="actions">
-			<button class="primary" onclick={() => copy(file.text(), file.name)}>
-				{copied === file.name ? 'Copied' : `Copy ${file.name}`}
-			</button>
-			<button onclick={() => download(file.name, file.text())}>Download</button>
+			<button onclick={() => copy(file.text, file.path)}>{copied === file.path ? 'Copied' : 'Copy'}</button>
+			<button onclick={() => save(file.path.split('/').at(-1) ?? file.path, file.text, 'text/plain')}>Download</button>
+			<code class="path">{file.path}</code>
 		</div>
-		<pre><code>{file.text()}</code></pre>
+		<pre><code>{file.text}</code></pre>
 	{/if}
 </div>
 
@@ -77,17 +79,20 @@
 		display: grid;
 		gap: 0.7rem;
 	}
-	.warnings {
-		margin: 0;
-		padding: 0.6rem 0.8rem 0.6rem 1.8rem;
-		border: 1px solid var(--warn-border);
-		border-radius: var(--radius);
-		background: var(--warn-bg);
-		color: var(--warn);
-		font-size: 0.88rem;
+	.actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		align-items: center;
+	}
+	.actions span,
+	.path {
+		color: var(--muted);
+		font-size: 0.82rem;
 	}
 	.tabs {
 		display: flex;
+		flex-wrap: wrap;
 		gap: 0.3rem;
 		border-bottom: 1px solid var(--border);
 	}
@@ -98,15 +103,13 @@
 		background: none;
 		padding: 0.4rem 0.7rem;
 		color: var(--muted);
+		font-family: var(--mono);
+		font-size: 0.85rem;
 	}
 	.tabs button[aria-selected='true'] {
 		color: var(--text);
 		border-bottom-color: var(--accent);
 		font-weight: 600;
-	}
-	.actions {
-		display: flex;
-		gap: 0.4rem;
 	}
 	pre {
 		margin: 0;

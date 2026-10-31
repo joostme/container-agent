@@ -1,4 +1,0 @@
-#:schema https://mise.jdx.dev/schema/mise.json
-[tools]
-# OpenCode 2 from npm (@opencode/cli); pin "1" in your own config for OpenCode 1
-opencode = "latest"

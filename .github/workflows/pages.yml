@@ -1,0 +1,62 @@
+name: Catalog and configurator
+
+# The catalog and the configurator are released together on every push to
+# main, independent of image releases. Tags deploy too, so the configurator
+# learns the new image version. Pages has to be enabled once under
+# Settings -> Pages -> Source: GitHub Actions.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # the whole history: every module version and the image tags
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@v3
+      - name: Check the catalog
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          case "${GITHUB_EVENT_NAME}" in
+            pull_request) base="origin/${GITHUB_BASE_REF}" ;;
+            push) base="${BEFORE}" ;;
+            *) base="" ;;
+          esac
+          # new branches and tags have no previous commit
+          git cat-file -e "${base}^{commit}" 2> /dev/null || base=""
+          scripts/check-catalog ${base:+"${base}"}
+      - name: Configurator
+        working-directory: web
+        run: |
+          npm ci
+          npm run check
+          npm test
+          npm run build
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: web/build
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5

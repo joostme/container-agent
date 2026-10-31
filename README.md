@@ -1,180 +1,188 @@
 # container-agent
 
-One Docker image for coding agents you control remotely: Claude Code Remote Control, T3 Code, OpenCode, code-server and more. You pick what runs with `AGENT_MODULES`; tools come from [mise](https://mise.jdx.dev), long-running processes are supervised by [pitchfork](https://pitchfork.jdx.dev).
+One Docker image for coding agents you control remotely: Claude Code Remote Control, T3 Code, OpenCode, Codex, code-server and more. A folder with an `agent.toml` says which modules run; tools come from [mise](https://mise.jdx.dev), long-running processes are supervised by [pitchfork](https://pitchfork.jdx.dev).
+
+The design and the reasons behind it are in [docs/architecture.md](docs/architecture.md).
 
 ## Configurator
 
-`web/` is a static page that turns picked modules and their settings into `compose.yaml` and `.env`, with the steps after the first start. Its editor defines custom modules (tools, apt packages, setup commands, variables and processes) that travel inside `compose.yaml`. It keeps secrets in `.env`, can load its own `compose.yaml` again, and puts the settings (without secrets) into a shareable link. Each release deploys it to GitHub Pages and attaches the build as `configurator.tar.gz`, which runs on any static host, also under a sub-path.
+[joostme.github.io/container-agent](https://joostme.github.io/container-agent/) is a static page that writes the whole setup: `compose.yaml`, `.env` with the secrets and the `config/` folder, as a zip, or everything in one `compose.yaml`. It reads the catalog, offers only module versions the chosen image reads, builds forms from the variable types, and has an editor for custom modules with a raw TOML view. It loads its own files again and offers updates of pinned modules with their changes. Settings travel in the page link (without secrets); *Share link* on a custom module gives a link that carries just that module, which others see in full, with what runs as root and the secrets it reads, before they add it.
 
 ## Quick start
 
 ```bash
-cp compose.example.yaml compose.yaml
-cp .env.example .env            # set PUID/PGID, AGENT_MODULES, passwords
+cp -r example my-agent && cd my-agent
+cp .env.example .env            # secrets: passwords, tokens
+$EDITOR config/agent.toml       # modules, puid/pgid, values
 docker compose up -d
 docker compose logs -f          # the first start installs all tools
 
 # One-time logins, persisted in the home volume
 docker compose exec agent agent-run claude      # then /login
 docker compose exec agent t3-pair               # pair a T3 app
-docker compose exec agent codex-pair            # pair the ChatGPT app with Codex
 ```
 
 `agent-run [command]` runs a command as the agent user with the mise tools and environment; without a command it opens a shell.
 
-## Modules
+## Configuration
 
-Everything you can enable is a module. **Services** run a process: remote control, web UIs, servers. **Apps** only install and set up: agents, CLIs and runtimes such as Node.js, Python or uv.
+The image reads one folder, mounted at `/etc/container-agent`, on every start:
 
 ```
-$ docker run --rm ghcr.io/joostme/container-agent modules
-bun              app      Bun, the JavaScript runtime and package manager
-claude           app      Claude Code CLI; log in once with `agent-run claude` and /login
-claude-remote    service  Claude Code Remote Control: sessions in claude.ai/code and the Claude apps
-code-server      service  VS Code in the browser (code-server), opens the workspace
-codex            app      OpenAI Codex CLI, e.g. as a provider in T3 Code; log in with `agent-run codex login --device-auth`
-codex-remote     service  Codex Remote Control: sessions in the ChatGPT app, listed under the container's host name; pair with `codex-pair`
-gh               app      GitHub CLI (gh); uses GH_TOKEN or GITHUB_TOKEN if set
-go               app      Go
-node             app      Node.js with npm; needed by agents that ship as npm packages
-oh-my-zsh        app      Oh My Zsh for the agent user's zsh
-opencode         service  OpenCode server with its web UI
-pnpm             app      pnpm, the Node.js package manager
-python           app      Python
-rust             app      Rust with cargo, through rustup
-sshd             service  SSH server for the agent user (key login only), e.g. for Remote-SSH from VS Code or Cursor
-t3               service  T3 Code server for the T3 web, desktop and mobile apps; drives Claude, Codex, OpenCode and more
-uv               app      uv, the Python package and project manager
+config/
+├── agent.toml            modules, versions, values
+└── modules/
+    └── java.toml         custom module, same format as in the catalog
 ```
 
-Modules a module `requires` are enabled with it (`claude-remote` brings `claude`, which brings `node`). Each module documents its variables, defaults and ports in its `module.toml`; `container-agent plan` shows the resolved setup:
+```toml
+#:schema https://raw.githubusercontent.com/joostme/container-agent/main/schema/v1/agent.schema.json
+format = 1
+puid = 1000
+pgid = 1000
+
+[modules]
+claude-remote = "1.0.0"   # catalog version, or "latest"
+t3 = "1.0.0"
+java = "local"            # modules/java.toml
+
+[env]
+CLAUDE_REMOTE_NAME = "nas"
+T3_PUBLIC_URL = "https://t3.example.org"
+```
+
+| Field | Default | |
+|---|---|---|
+| `format` | required | Version of this format |
+| `puid`, `pgid` | `1000` | UID and GID of the agent user, matching the owner of the volumes on the host |
+| `workspace` | `/repos` | Working directory of the agents and daemons |
+| `auto_update` | `true` | Upgrade tools tracked as `latest` on every start |
+| `catalog` | the official one | URL or path of the catalog modules come from |
+| `[modules]` | | Enabled modules; modules they `require` come along |
+| `[env]` | | Values of module variables, not secrets |
+
+- A variable in the container environment wins over `[env]`, and `PUID`/`PGID` over `puid`/`pgid`, so Unraid templates or Portainer can set everything as environment variables.
+- Secrets (variables of `type = "secret"`) only come from the environment, e.g. `.env`; in `[env]` they stop the start. So `agent.toml` can live in git.
+- Changes need a restart, not a new container.
+- Instead of a folder, `compose.yaml` can carry the files with `configs:` and `content:` (Docker Compose 2.23 or later, `$` written as `$$`).
+
+`container-agent plan` shows the resolved setup: modules in order, environment (secrets masked), commands, and the generated mise and pitchfork configs.
 
 ```bash
 docker compose exec agent container-agent plan
 ```
 
-Runtime apps install a sensible default version. Pick another one with the variable mise reads itself, e.g. `MISE_NODE_VERSION=22` or `MISE_PYTHON_VERSION=3.13`. Any other tool from the [mise registry](https://mise.jdx.dev/registry.html) goes into your own mise config.
+Daemons: `agent-run pitchfork list`, `agent-run pitchfork logs <name>`, `agent-run pitchfork restart <name>`. The container turns unhealthy when a daemon has failed.
 
-## Configuration
+## Modules
 
-| Variable | Default | |
-|---|---|---|
-| `AGENT_MODULES` | | Comma-separated modules to enable |
-| `PUID`, `PGID` | `1000` | UID/GID of the agent user, match your host user |
-| `AGENT_USER` | `agent` | Name of the agent user, home is `/home/$AGENT_USER` |
-| `AGENT_WORKSPACE` | `/repos` | Working directory of the agents and daemons |
-| `AUTO_UPDATE` | `true` | Upgrade tools tracked as `latest` on every start |
+Everything you can enable is a module. **Services** run a process: remote control, web UIs, servers. **Apps** only install and set up: agents, CLIs and runtimes.
 
-Your own setup lives in the home volume and survives image updates:
-
-- **Tools and env vars:** `~/.config/mise/config.toml`. It overrides the modules, e.g. `opencode = "1"` to stay on OpenCode 1. `[env]` values reach all daemons and shells.
-- **apt packages:** `[bootstrap.packages]` in the same file, e.g. `"apt:ffmpeg" = "latest"`. They are installed on start.
-- **Daemons:** `~/.config/pitchfork/config.toml`, in pitchfork syntax.
-- **Modules:** `~/.config/container-agent/modules/<name>/`. A module with the name of a built-in one replaces it.
-- **Modules in compose.yaml:** mounted under `/etc/container-agent/custom/<name>/` with `configs:` and `content:` (Docker Compose 2.23 or later), which the configurator writes. They win over the other two. Write `$$` for a literal `$` there, compose replaces `$VAR` in the content too.
-
-```yaml
-services:
-  agent:
-    environment:
-      AGENT_MODULES: java
-    configs:
-      - source: java-mise
-        target: /etc/container-agent/custom/java/mise.toml
-      - source: java-module
-        target: /etc/container-agent/custom/java/module.toml
-configs:
-  java-mise:
-    content: |
-      [tools]
-      java = "21"
-  java-module:
-    content: |
-      description = "Java 21"
+```
+$ docker run --rm ghcr.io/joostme/container-agent modules
+bun              app      1.0.0    Bun, the JavaScript runtime and package manager
+claude           app      1.0.0    Claude Code CLI; log in once with `agent-run claude` and /login
+claude-remote    service  1.0.0    Claude Code Remote Control: sessions in claude.ai/code and the Claude apps
+code-server      service  1.0.0    VS Code in the browser (code-server), opens the workspace
+codex            app      1.0.0    OpenAI Codex CLI, e.g. as a provider in T3 Code
+codex-remote     service  1.0.0    Codex Remote Control: sessions in the ChatGPT app, listed under the container's host name
+gh               app      1.0.0    GitHub CLI (gh); uses GH_TOKEN or GITHUB_TOKEN if set
+go               app      1.0.0    Go
+node             app      1.0.0    Node.js with npm; needed by agents that ship as npm packages
+oh-my-zsh        app      1.0.0    Oh My Zsh for the agent user's zsh
+opencode         service  1.0.0    OpenCode server with its web UI
+pnpm             app      1.0.0    pnpm, the Node.js package manager
+python           app      1.0.0    Python
+rust             app      1.0.0    Rust with cargo, through rustup
+sshd             service  1.0.0    SSH server for the agent user (key login only), e.g. for Remote-SSH from VS Code or Cursor
+t3               service  1.0.0    T3 Code server for the T3 web, desktop and mobile apps; drives Claude, Codex, OpenCode and more
+uv               app      1.0.0    uv, the Python package and project manager
 ```
 
-Daemons: `agent-run pitchfork list`, `agent-run pitchfork logs <name>`, `agent-run pitchfork restart <name>`. The container turns unhealthy when a daemon has failed.
+The catalog lives in [catalog/](catalog) and is released on its own, independent of the image. On start the image downloads the pinned version of each module, checks it against the `sha256` in the catalog index and caches it in the home volume, so a container with pinned modules also starts when the catalog is unreachable.
+
+Runtime apps install a sensible default version. Pick another one with the variable mise reads itself, e.g. `MISE_NODE_VERSION = "22"` in `[env]`.
 
 ## Writing a module
 
-A module is a directory with two files:
-
-```
-modules/t3/
-├── module.toml   # what the container does with it: metadata, variables, daemons
-├── mise.toml     # what gets installed: tools, apt packages, setup hooks (plain mise)
-└── bin/          # optional: executables put on the PATH, e.g. t3-pair
-```
-
-`module.toml` has a JSON schema, so editors with a TOML language server complete and check it. For daemons it links the schema of the pitchfork version in the image. [Tombi](https://tombi-toml.github.io/tombi/) also flags unknown daemon options such as a misspelled `retry`; Taplo (Even Better TOML) completes them but lets typos through, and pitchfork ignores unknown options silently. Put this in the first line, with the version of the image the module is for:
+A module is one TOML file in three layers: fields of container-agent and its variables in `[env]`, a mise config in `[mise]`, and pitchfork daemons in `[daemons]`.
 
 ```toml
-#:schema https://raw.githubusercontent.com/joostme/container-agent/v0.1.0/schema/module.schema.json
-description = "T3 Code server"
-after = ["claude", "codex", "opencode"]   # set up and start after these, if enabled
-# requires = ["claude"]                   # enable these too, set them up first
-next_steps = ["Pair a device: `t3-pair`"] # shown by the configurator; `commands` run in the container
+#:schema https://raw.githubusercontent.com/joostme/container-agent/main/schema/v1/module.schema.json
+format = 1
+name = "jupyter"
+description = "JupyterLab"
+version = "1.0.0"
+requires = ["uv"]
+next_steps = ["Open JupyterLab on JUPYTER_PORT and sign in with JUPYTER_TOKEN"]
 
-[env.T3_PORT]
-default = "3773"   # used when the container leaves it empty
-port = "http"      # for configurators: published port and protocol
-# required = true  # refuse to start without a value
-# secret = true    # password or token
+[env.JUPYTER_PORT]
+type = "port"
+protocol = "http"
+default = "8888"
 
-[daemons.t3]       # pitchfork syntax
-run = 'exec t3 serve --host 0.0.0.0 --port "$T3_PORT" --no-browser'
+[env.JUPYTER_TOKEN]
+type = "secret"
+required = true
+
+[mise.tools]
+"pipx:jupyterlab" = "latest"
+
+[daemons.jupyter]
+run = 'exec jupyter lab --ip 0.0.0.0 --port "$JUPYTER_PORT" --IdentityProvider.token="$JUPYTER_TOKEN"'
 retry = true
-ready_cmd = 'curl -s -o /dev/null "http://127.0.0.1:$T3_PORT/"'
+ready_cmd = 'curl -s -o /dev/null "http://127.0.0.1:$JUPYTER_PORT/"'
 ```
 
-Daemons run as the agent user through `mise x`, in `AGENT_WORKSPACE`, and start on boot; set `user = "root"`, `mise = false`, `dir` or `boot_start = false` to change that. Reference variables as `$VAR` in `run`, it is a shell command. pitchfork restarts a failed daemon right away, so a daemon that fails fast (e.g. no login yet) should sleep before it exits.
+- **`[env]`**: variables with `type` (`string`, `secret`, `port`, `bool`, `choice`, `path`), `default`, `required`, `choices`, `protocol` and `description`.
+- **`[mise]`**: `tools`, `tasks` and in `bootstrap` the apt `packages` and the `post-packages` (as root) and `post-tools` (as the agent user) hooks. Hooks run on every start, so keep them idempotent. Each task also becomes a command on the `PATH` (`t3-pair` runs `mise run t3-pair`); tasks that take arguments declare them with `usage = 'arg "[args]..." var=#true'` and read `$usage_args`.
+- **`[daemons]`**: pitchfork syntax. The image fills in `boot_start = true`, `dir` = the workspace, and the mise tools and environment; daemons run as the agent user unless `user = "root"`. pitchfork restarts a failed daemon right away, so a daemon that fails fast (e.g. no login yet) should sleep before it exits: `|| { sleep 30; exit 1; }`.
 
-In `mise.toml`, hooks set things up on every start, so keep them idempotent:
+Modules for the catalog go to `catalog/<name>.toml` by pull request. Their variables start with the module name (`JUPYTER_`, or `MISE_JUPYTER_` for one mise reads itself), tasks and daemons are the module name or start with it and a dash, and every change raises `version`. A published version never changes; the catalog keeps every version a module ever had.
 
-- `[bootstrap.hooks.post-packages]` runs as **root**, after the apt packages (e.g. write `/etc/ssh/sshd_config.d/`)
-- `[bootstrap.hooks.post-tools]` and `final` run as the **agent user**, after the tools are installed
-
-Hooks see `AGENT_USER`, `AGENT_HOME`, `AGENT_WORKSPACE` and the module variables. Their order follows the module order.
+The schema links the mise and pitchfork schemas of the versions in the image, so editors with a TOML language server complete and check all three layers. [Tombi](https://tombi-toml.github.io/tombi/) also flags unknown daemon options such as a misspelled `retry`, which pitchfork would silently ignore. The entrypoint checks the same rules again and stops the start on anything it does not know.
 
 ## How a start works
 
-1. Create the agent user from `PUID`/`PGID`.
-2. Resolve `AGENT_MODULES` with `requires` and `after`; set variable defaults.
-3. Copy the `mise.toml` of every module to `/etc/mise/conf.d/`, in that order.
-4. `mise bootstrap --only packages` as root, then `mise bootstrap --skip packages` as the agent user (tools and hooks); `mise upgrade` if `AUTO_UPDATE`.
-5. Write the `[daemons]` of all modules to `/etc/pitchfork/config.toml` and run `pitchfork supervisor run --container --boot`.
+1. Read `agent.toml`, create the user `agent` with `puid`/`pgid`.
+2. Resolve the modules with `requires` and `after`, from `modules/` or the catalog; check them.
+3. Set the variables: environment, then `[env]`, then the module defaults.
+4. Write the `[mise]` of every module to `/etc/mise/conf.d/` in that order, and a command per task.
+5. `mise bootstrap --only packages` as root, then `mise bootstrap --skip packages` as the agent user (tools and hooks); `mise upgrade` if `auto_update`.
+6. Write the `[daemons]` of all modules to `/etc/pitchfork/config.toml` and run the pitchfork supervisor.
 
-mise, pitchfork and yq are pinned in the `Dockerfile` (Renovate bumps them) and do not update themselves. One Debian image per architecture, `linux/amd64` and `linux/arm64`; a module that works on only one says so with `arch`.
+mise, pitchfork and yq are pinned in the `Dockerfile` (Renovate bumps them together with the schema links) and do not update themselves. One Debian image per architecture, `linux/amd64` and `linux/arm64`; a module that works on only one says so with `arch`.
 
 ## Development
 
 ```bash
-mise run lint     # shellcheck, TOML against the schemas (tombi), pinned versions match
-mise run test     # module resolution and generated pitchfork config
+mise run lint     # shellcheck, TOML against the schemas (tombi), pinned versions, catalog rules
+mise run test     # entrypoint: resolution, checks, values, generated configs; catalog history
+scripts/check-catalog origin/main   # also: every changed module raised its version
 ```
 
 ```bash
 cd web
 npm ci
-npm run dev       # configurator on http://localhost:5173, registry built from ../modules
-npm test          # generator tests, module order compared with the entrypoint
+npm run dev       # configurator on http://localhost:5173, with the catalog built from git
+npm test          # generator, import, links, module order compared with the entrypoint, the page in jsdom
 npm run check     # svelte-check
 ```
 
-Renovate bumps pitchfork in the `Dockerfile` and in the schema link in one PR. The CI builds the image, starts it with a few modules until it is healthy, and publishes `linux/amd64` and `linux/arm64` to `ghcr.io/joostme/container-agent`.
+Two workflows:
+
+- **Image** (`image.yml`): lint and tests, then builds the image, starts it with a catalog built from the same commit until it is healthy, and publishes `linux/amd64` and `linux/arm64` to `ghcr.io/joostme/container-agent`, as `latest` from `main`.
+- **Catalog and configurator** (`pages.yml`): checks the catalog against the previous commit or the pull request base, builds every module version from the git history and the configurator, and deploys both to GitHub Pages on every push to `main`. Image releases are not needed for catalog changes.
+
+Renovate bumps mise and pitchfork in the `Dockerfile` and in the schema links in one PR.
 
 ## Releases
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.3.0 && git push origin v0.3.0
 ```
 
-A `v*` tag publishes the image as `0.1.0`, `0.1` and `0` (pushes to `main` publish `latest`), then creates a GitHub release with generated notes and two files:
-
-- `registry.json`: the modules of this version, with their variables, ports and next steps; the configurator is built from it
-- `configurator.tar.gz`: the configurator for this version, generating `compose.yaml` with the image tag `0.1.0`
-
-The same tag deploys that configurator to GitHub Pages. Pages has to be enabled once under **Settings → Pages → Source: GitHub Actions**.
+A `v*` tag publishes the image as `0.3.0`, `0.3` and `0` and creates a GitHub release with generated notes. It also deploys the configurator again, which then offers the new version with the module formats its entrypoint reads.
 
 ## License
 

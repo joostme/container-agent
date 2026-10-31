@@ -1,5 +1,0 @@
-#:schema ../../schema/module.schema.json
-description = "uv, the Python package and project manager"
-
-[env.MISE_UV_VERSION]
-description = "Version to install instead of latest, e.g. 0.9; mise reads this variable itself"

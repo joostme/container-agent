@@ -1,0 +1,20 @@
+# Example: Claude Code Remote Control and T3 Code, with VS Code in the browser.
+# Copy this folder, set the modules and values in config/agent.toml and the
+# secrets in .env (from .env.example). Publish the ports of your modules.
+services:
+  agent:
+    image: ghcr.io/joostme/container-agent:latest
+    hostname: agent
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # agent.toml and custom modules; read on every start
+      - ./config:/etc/container-agent:ro
+      # the whole home: logins, mise tools, caches and module state
+      - ./data/home:/home/agent
+      - ./data/repos:/repos
+      # SSH keys for git (read-only, copied into ~/.ssh on start)
+      - ~/.ssh:/home/agent/.ssh-keys:ro
+    ports:
+      - "8080:8080" # code-server
+      - "3773:3773" # T3 Code

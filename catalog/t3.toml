@@ -1,0 +1,76 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "t3"
+description = "T3 Code server for the T3 web, desktop and mobile apps; drives Claude, Codex, OpenCode and more"
+version = "1.0.0"
+tags = ["remote control", "web ui"]
+requires = ["node"]
+after = ["claude", "codex", "opencode"]
+next_steps = ["Pair the T3 app or a browser: `t3-pair` (set T3_PUBLIC_URL or T3_PUBLIC_HOST first, so the link works from other devices)"]
+
+[env.T3_PORT]
+type = "port"
+protocol = "http"
+default = "3773"
+description = "Port of the T3 server"
+
+[env.T3_PUBLIC_URL]
+description = "URL of a reverse proxy in front of the server (e.g. https://t3.example.org), used by t3-pair for pairing links"
+
+[env.T3_PUBLIC_HOST]
+description = "LAN IP or host name of the Docker host, used by t3-pair when T3_PUBLIC_URL is not set"
+
+[env.T3_PUBLIC_PORT]
+description = "Published host port for T3_PUBLIC_HOST, if it differs from T3_PORT"
+
+[mise.tools]
+# Only a launcher: it downloads the server of its version into ~/.t3/runtime
+"npm:t3" = "latest"
+
+[mise.bootstrap.packages]
+"apt:qrencode" = "latest"
+
+# `t3 pair` builds the link from the container's own network interfaces, so it
+# would point at the Docker bridge IP that only the host reaches. This keeps
+# its token and swaps in T3_PUBLIC_URL or T3_PUBLIC_HOST.
+[mise.tasks.t3-pair]
+description = "Pairing link and QR code for the T3 apps, e.g. t3-pair --ttl 15m --label phone"
+usage = 'arg "[args]..." var=#true help="passed to t3 pair"'
+shell = "bash -c"
+run = '''
+set -euo pipefail
+out=$(t3 pair ${usage_args:-})
+
+if [ -n "${T3_PUBLIC_URL:-}" ]; then
+    base="${T3_PUBLIC_URL%/}"
+elif [ -n "${T3_PUBLIC_HOST:-}" ]; then
+    base="http://${T3_PUBLIC_HOST}:${T3_PUBLIC_PORT:-${T3_PORT}}"
+else
+    printf '%s\n\n' "${out}"
+    echo "Note: set T3_PUBLIC_URL or T3_PUBLIC_HOST (LAN IP or host name of the Docker host) to get a link other devices can open."
+    exit 0
+fi
+
+token=$(sed -n 's/^Token: //p' <<< "${out}")
+expires=$(sed -n 's/^Expires: //p' <<< "${out}")
+if [ -z "${token}" ]; then
+    printf '%s\n' "${out}" >&2
+    echo "t3-pair: no token in the output of t3 pair" >&2
+    exit 1
+fi
+
+url="${base}/pair#token=${token}"
+app_link="t3code://pair?pairingUrl=$(jq -rn --arg u "${url}" '$u | @uri')"
+
+qrencode -t ANSIUTF8 -m 2 "${url}"
+echo
+echo "Pairing URL: ${url}"
+echo "App link: ${app_link}"
+echo "Token: ${token}"
+echo "Expires: ${expires}"
+'''
+
+[daemons.t3]
+run = 'exec t3 serve --host 0.0.0.0 --port "$T3_PORT" --no-browser'
+retry = true
+ready_cmd = 'curl -s -o /dev/null "http://127.0.0.1:$T3_PORT/"'

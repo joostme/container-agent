@@ -1,0 +1,250 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/joostme/container-agent/main/schema/v1/module.schema.json",
+  "title": "container-agent module, format 1",
+  "description": "One container-agent module: what it installs and runs. container-agent fields and [env] are defined here; [mise] is a mise config and [daemons] are pitchfork daemons, at the versions the image pins.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "name",
+    "description"
+  ],
+  "properties": {
+    "format": {
+      "description": "Version of the module format.",
+      "const": 1
+    },
+    "name": {
+      "description": "Global id of the module. In the catalog it equals the file name.",
+      "$ref": "#/$defs/moduleName"
+    },
+    "description": {
+      "description": "One line about what the module does.",
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "description": "Semver of the module, raised on every change. Required in the catalog.",
+      "$ref": "#/$defs/semver"
+    },
+    "tags": {
+      "description": "Free text, for search.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "author": {
+      "description": "Shown in the catalog.",
+      "type": "string"
+    },
+    "homepage": {
+      "description": "Shown in the catalog.",
+      "type": "string",
+      "format": "uri"
+    },
+    "requires": {
+      "description": "Modules enabled with this one and set up before it.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/moduleName"
+      },
+      "uniqueItems": true
+    },
+    "after": {
+      "description": "Modules to set up and start before this one, if they are enabled too.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/moduleName"
+      },
+      "uniqueItems": true
+    },
+    "arch": {
+      "description": "CPU architectures the module works on; omitted means all.",
+      "type": "array",
+      "items": {
+        "enum": [
+          "amd64",
+          "arm64"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "next_steps": {
+      "description": "What to do after the first start. Backticks mark commands run in the container.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "env": {
+      "description": "Variables the module reads. Keys are variable names.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Z][A-Z0-9_]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/envVar"
+      }
+    },
+    "mise": {
+      "description": "A mise config (https://mise.jdx.dev/configuration.html), limited to tools, tasks, apt packages and the post-packages and post-tools hooks. Every task also becomes a command on the PATH.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "$ref": "https://raw.githubusercontent.com/jdx/mise/v2026.10.22/schema/mise.json#/properties/tools"
+        },
+        "tasks": {
+          "$ref": "https://raw.githubusercontent.com/jdx/mise/v2026.10.22/schema/mise.json#/properties/tasks"
+        },
+        "bootstrap": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "packages": {
+              "description": "Debian packages, as \"apt:<name>\" = \"latest\".",
+              "$ref": "https://raw.githubusercontent.com/jdx/mise/v2026.10.22/schema/mise.json#/properties/bootstrap/properties/packages",
+              "propertyNames": {
+                "pattern": "^apt:.+$"
+              }
+            },
+            "hooks": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "post-packages": {
+                  "description": "Runs as root after the packages of all modules, on every start.",
+                  "$ref": "https://raw.githubusercontent.com/jdx/mise/v2026.10.22/schema/mise.json#/$defs/bootstrap_hook"
+                },
+                "post-tools": {
+                  "description": "Runs as the agent user after the tools of all modules, on every start.",
+                  "$ref": "https://raw.githubusercontent.com/jdx/mise/v2026.10.22/schema/mise.json#/$defs/bootstrap_hook"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "daemons": {
+      "description": "Long-running processes as pitchfork daemons (https://pitchfork.jdx.dev). The image adds boot_start = true, dir = the workspace, mise = true and the agent user unless they are set.",
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/moduleName"
+      },
+      "additionalProperties": {
+        "$ref": "https://raw.githubusercontent.com/jdx/pitchfork/v2.32.3/docs/public/schema.json#/$defs/PitchforkTomlDaemon",
+        "unevaluatedProperties": false
+      }
+    }
+  },
+  "$defs": {
+    "moduleName": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"
+    },
+    "envVar": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "description": "Kind of value; configurators build their forms from it. secret values come only from the container environment.",
+          "enum": [
+            "string",
+            "secret",
+            "port",
+            "bool",
+            "choice",
+            "path"
+          ],
+          "default": "string"
+        },
+        "default": {
+          "description": "Used when no value is set.",
+          "type": "string"
+        },
+        "required": {
+          "description": "The start stops without a value.",
+          "type": "boolean",
+          "default": false
+        },
+        "choices": {
+          "description": "Allowed values of a choice.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "protocol": {
+          "description": "Protocol of a port.",
+          "enum": [
+            "http",
+            "tcp"
+          ]
+        },
+        "description": {
+          "description": "Shown next to the field.",
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "choice"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "choices"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "choices"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "port"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {},
+          "else": {
+            "not": {
+              "required": [
+                "protocol"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

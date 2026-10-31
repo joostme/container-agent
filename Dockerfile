@@ -52,19 +52,16 @@ RUN set -eux; \
     chmod +x /usr/local/bin/mise /usr/local/bin/pitchfork /usr/local/bin/yq; \
     mise --version; pitchfork --version; yq --version
 
+# The image carries no modules: agent.toml in /etc/container-agent names
+# them, and the entrypoint downloads them from the catalog
 COPY image/mise.toml /etc/mise/config.toml
-COPY modules /etc/container-agent/modules
 COPY image/container-agent image/agent-run /usr/local/bin/
 
-ENV AGENT_USER=agent \
-    PUID=1000 \
-    PGID=1000 \
-    AGENT_WORKSPACE=/repos \
-    AUTO_UPDATE=true \
-    PITCHFORK_SUPERVISOR_AUTO_START=false
+# No PUID/PGID defaults here: they would always win over agent.toml
+ENV PITCHFORK_SUPERVISOR_AUTO_START=false
 
-# Executables of the enabled modules and the mise shims of the agent user, both
-# linked on start, so `docker exec` finds the tools without a login shell
+# Commands from the tasks of the enabled modules and the mise shims of the
+# agent user, both made on start, so `docker exec` finds them without a login shell
 ENV PATH="/run/container-agent/bin:/run/container-agent/shims:${PATH}"
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=600s --retries=3 \

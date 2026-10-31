@@ -11,7 +11,7 @@ set -euo pipefail
 
 if [ "$(id -u)" = 0 ]; then
     exec gosu "${PUID}:${PGID}" env \
-        HOME="${AGENT_HOME}" USER="${AGENT_USER}" LOGNAME="${AGENT_USER}" SHELL=/bin/zsh \
+        HOME="${AGENT_HOME}" USER=agent LOGNAME=agent SHELL=/bin/zsh \
         "$0" "$@"
 fi
 

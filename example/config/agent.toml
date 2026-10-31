@@ -1,0 +1,19 @@
+#:schema https://raw.githubusercontent.com/joostme/container-agent/main/schema/v1/agent.schema.json
+format = 1
+# owner of ./data on the host (run `id`)
+puid = 1000
+pgid = 1000
+
+# `docker run --rm ghcr.io/joostme/container-agent modules` lists the catalog
+[modules]
+claude-remote = "1.0.0"
+t3 = "1.0.0"
+code-server = "1.0.0"
+gh = "1.0.0"
+# java = "local"        # custom module in modules/java.toml
+
+[env]
+CLAUDE_REMOTE_NAME = "my-agent"
+# reverse proxy URL or LAN address for pairing links (t3-pair)
+# T3_PUBLIC_URL = "https://t3.example.org"
+# T3_PUBLIC_HOST = "192.168.1.10"

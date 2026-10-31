@@ -1,0 +1,14 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "gh"
+description = "GitHub CLI (gh); uses GH_TOKEN or GITHUB_TOKEN if set"
+version = "1.0.0"
+tags = ["git", "github", "cli"]
+next_steps = ["Set GH_TOKEN, or log in once: `agent-run gh auth login`"]
+
+[env.GH_TOKEN]
+type = "secret"
+description = "GitHub token for gh and the GitHub API; also avoids rate limits when mise installs tools"
+
+[mise.tools]
+gh = "latest"

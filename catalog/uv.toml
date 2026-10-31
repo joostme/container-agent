@@ -1,0 +1,13 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "uv"
+description = "uv, the Python package and project manager"
+version = "1.0.0"
+tags = ["python", "package manager"]
+
+# Read by mise itself, so it needs no UV_ prefix
+[env.MISE_UV_VERSION]
+description = "Version instead of latest, e.g. 0.9"
+
+[mise.tools]
+uv = "latest"

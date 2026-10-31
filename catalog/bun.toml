@@ -1,0 +1,13 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "bun"
+description = "Bun, the JavaScript runtime and package manager"
+version = "1.0.0"
+tags = ["runtime", "javascript"]
+
+# Read by mise itself, so it needs no BUN_ prefix
+[env.MISE_BUN_VERSION]
+description = "Version instead of latest, e.g. 1.3"
+
+[mise.tools]
+bun = "latest"

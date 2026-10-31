@@ -1,0 +1,13 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "go"
+description = "Go"
+version = "1.0.0"
+tags = ["runtime", "go"]
+
+# Read by mise itself, so it needs no GO_ prefix
+[env.MISE_GO_VERSION]
+description = "Version instead of latest, e.g. 1.25"
+
+[mise.tools]
+go = "latest"

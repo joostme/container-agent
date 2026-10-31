@@ -1,12 +1,20 @@
+<script lang="ts" module>
+	export interface ToolRow {
+		name: string;
+		/** A version, or a table with installer options (edited as TOML). */
+		value: unknown;
+	}
+</script>
+
 <script lang="ts">
 	import miseTools from '#lib/mise-tools.json';
-	import type { Tool } from '#lib/types.js';
 
 	interface Props {
-		tools: Tool[];
+		rows: ToolRow[];
+		onchange: () => void;
 	}
 
-	let { tools = $bindable() }: Props = $props();
+	let { rows = $bindable(), onchange }: Props = $props();
 
 	// The <datalist id="mise-tools"> with these names is rendered once by the page
 	const known = new Map((miseTools as { name: string; description: string }[]).map((t) => [t.name, t.description]));
@@ -21,22 +29,23 @@
 	};
 
 	function add() {
-		tools = [...tools, { name: '', version: '' }];
+		rows = [...rows, { name: '', value: 'latest' }];
 	}
 
 	function remove(index: number) {
-		tools = tools.filter((_, i) => i !== index);
+		rows = rows.filter((_, i) => i !== index);
+		onchange();
 	}
 </script>
 
-{#if tools.length > 0}
+{#if rows.length > 0}
 	<div class="rows">
-		{#each tools as tool, i (i)}
-			{@const info = hint(tool.name)}
+		{#each rows as row, i (i)}
+			{@const info = hint(row.name)}
 			<div class="row">
 				<div class="name">
 					<input
-						bind:value={tool.name}
+						bind:value={row.name}
 						list="mise-tools"
 						placeholder="e.g. java, terraform, npm:prettier"
 						aria-label="Tool"
@@ -45,8 +54,12 @@
 					/>
 					{#if info.text}<small class:unknown={info.unknown} title={info.text}>{info.text}</small>{/if}
 				</div>
-				<input bind:value={tool.version} placeholder="latest" aria-label="Version" class="version" spellcheck="false" />
-				<button type="button" onclick={() => remove(i)} aria-label="Remove {tool.name || 'tool'}">Remove</button>
+				{#if typeof row.value === 'string'}
+					<input bind:value={row.value} placeholder="latest" aria-label="Version" spellcheck="false" />
+				{:else}
+					<input value="options, see TOML" aria-label="Version" disabled />
+				{/if}
+				<button type="button" onclick={() => remove(i)} aria-label="Remove {row.name || 'tool'}">Remove</button>
 			</div>
 		{/each}
 	</div>

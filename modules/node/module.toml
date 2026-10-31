@@ -1,5 +1,0 @@
-#:schema ../../schema/module.schema.json
-description = "Node.js with npm; needed by agents that ship as npm packages"
-
-[env.MISE_NODE_VERSION]
-description = "Version to install instead of lts, e.g. 22 or lts; mise reads this variable itself"

@@ -1,8 +1,0 @@
-#:schema https://mise.jdx.dev/schema/mise.json
-[tools]
-# Only a launcher: it downloads the server of its version into ~/.t3/runtime
-"npm:t3" = "latest"
-
-# QR codes of t3-pair
-[bootstrap.packages]
-"apt:qrencode" = "latest"

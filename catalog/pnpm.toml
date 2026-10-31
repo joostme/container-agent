@@ -1,0 +1,14 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "pnpm"
+description = "pnpm, the Node.js package manager"
+version = "1.0.0"
+tags = ["javascript", "package manager"]
+requires = ["node"]
+
+# Read by mise itself, so it needs no PNPM_ prefix
+[env.MISE_PNPM_VERSION]
+description = "Version instead of latest, e.g. 10"
+
+[mise.tools]
+pnpm = "latest"

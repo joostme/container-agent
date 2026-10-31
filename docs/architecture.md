@@ -229,7 +229,7 @@ The image's own duties, not modules: the user, the home, shell setup, SSH keys f
 
 ## Variables
 
-Variables of all modules share one environment, so names must not collide. Catalog modules prefix theirs with the module name in upper case (`t3` → `T3_`); CI enforces it. Exceptions are agreed in review for well-known names a tool reads itself (`GH_TOKEN`).
+Variables of all modules share one environment, so names must not collide. Catalog modules prefix theirs with the module name in upper case (`t3` → `T3_`); CI enforces it. A variable mise reads itself may carry `MISE_` in front (`MISE_NODE_VERSION` in `node`). The same goes for tasks and daemons: the module name, or the module name and a dash (`t3-pair`). On top, CI refuses a variable, task or daemon that two catalog modules define.
 
 Values come from `[env]` in `agent.toml` and from the container environment, which wins; secrets only from the environment. A default applies when the value is empty; a `required` variable without value stops the start. Tool versions can come from variables mise reads itself (`MISE_NODE_VERSION`).
 
@@ -256,17 +256,18 @@ The container needs the network at first start anyway, to install tools; module 
 ## Catalog
 
 - Source: `catalog/<name>.toml` in this repository; contributions by pull request.
-- CI checks every changed module: schema, name equals file name, variable and task prefixes, `version` raised, resolution through the entrypoint, and a container start for modules that need no login.
+- CI checks every changed module: schema, name equals file name, prefixes of variables, tasks and daemons, `version` raised against the base of the pull request or push (`scripts/check-catalog`), resolution through the entrypoint (`tests/run`), and a container start for modules that need no login.
 - On every merge CI publishes the catalog to GitHub Pages, independent of image releases:
   - `catalog/<name>/<version>.toml` for every version a module ever had, rebuilt from the git history, so pins never break;
   - `catalog/index.json` with name, description, tags, kind (service if it has daemons, app otherwise), author and, per version, `format`, `sha256` and the date.
+  - A version is immutable: if a published version shows up again with other content (a push that skipped the check), the first content stays and the build warns.
 - Tags are free text; the configurator offers the ones in use for filtering.
 - Other catalogs use the same layout, so anyone can host one (`catalog` in `agent.toml`).
 
 ## Configurator
 
 - Deployed with the catalog on every merge; it reads `index.json` and so always knows every module and version.
-- The image tag only selects the engine. The configurator knows which `format` each engine release reads and offers only module versions that fit.
+- The image tag only selects the engine. The configurator knows which `format` each engine release reads (from `FORMATS` in the entrypoint of every `v*` tag, collected at build time) and offers only module versions that fit.
 - The editor has forms for the container-agent fields and the common parts of mise and pitchfork (tools, packages, hooks, tasks, daemons with `run`, `retry`, ready checks), plus a raw TOML view for everything else. It edits the parsed file and keeps keys it has no form for, so loading a module and saving it again changes nothing.
 - Output: `compose.yaml`, `.env` and the `config/` folder with `agent.toml` and custom modules, as a zip; or, on request, everything in one `compose.yaml` with `configs:`.
 - Loading an `agent.toml` (or a `compose.yaml` that contains one) shows newer versions of its catalog modules, with a diff, and updates the pins on request.
@@ -294,7 +295,7 @@ Every source shows, before adding, what runs as root (`post-packages` hooks, dae
 - mise and pitchfork show through: `[mise]` and `[daemons]` use their syntax.
 - `[mise]` may contain `tools`, `tasks`, `bootstrap.packages` and `bootstrap.hooks`, nothing else in version 1.
 - Variables have a `type` instead of `secret` and `port` flags.
-- Catalog modules prefix their variables and task names with the module name; CI enforces it.
+- Catalog modules prefix their variables, tasks and daemons with the module name; CI enforces it.
 - The catalog lives in this repository but is released on its own, not with the image.
 - Catalog modules are downloaded at start by pinned version, checked against the index and cached in the home volume.
 - A container is configured by one folder: `agent.toml` with `[modules]` (catalog version or `local`) and `[env]`, custom modules in `modules/`. No `AGENT_MODULES`, no user modules in the home volume.
@@ -307,7 +308,7 @@ Every source shows, before adding, what runs as root (`post-packages` hooks, dae
 ## From today to version 1
 
 1. Schemas v1 for modules and `agent.toml`; the entrypoint: reading `/etc/container-agent`, one file per module, `[mise]` to `conf.d`, `[daemons]` with defaults, tasks as commands, `format` check, fixed user `agent`.
-2. Move the 17 modules to `catalog/<name>.toml` in format 1; `t3-pair` and `codex-pair` become mise tasks.
+2. Move the 17 modules to `catalog/<name>.toml` in format 1; `t3-pair` and `codex-pair` become mise tasks (`codex-pair` as `codex-remote-pair`, after its module).
 3. Catalog CI: checks, all versions and `index.json` on Pages; downloading, checking and caching in the entrypoint.
 4. Configurator: `agent.toml` and the config folder as output, editor on the module format with raw TOML view, forms by `type`, pinned versions, update offers.
 5. Sharing by link.

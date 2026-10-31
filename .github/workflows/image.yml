@@ -1,4 +1,4 @@
-name: Build
+name: Image
 
 on:
   push:
@@ -23,39 +23,16 @@ jobs:
       - run: mise run lint
       - run: mise run test
 
-  # The configurator, built for the image version of this ref: the tag without
-  # its v for releases, latest otherwise
-  web:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v7
-      # node, and yq for the test that compares with the entrypoint
-      - uses: jdx/mise-action@v3
-      - name: Image version
-        run: |
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then version="${GITHUB_REF_NAME#v}"; else version=latest; fi
-          echo "IMAGE_VERSION=${version}" >> "${GITHUB_ENV}"
-      - run: npm ci
-      - run: npm run check
-      - run: npm test
-      - run: |
-          npm run build
-          cp src/lib/registry.json build/registry.json
-      - uses: actions/upload-artifact@v7
-        with:
-          name: configurator
-          path: web/build
-
-  # Starts the image with modules that need no login and waits until the
-  # container reports healthy, i.e. setup ran and all daemons are up
+  # Starts the image with modules that need no login, from a catalog built
+  # from this ref, and waits until the container reports healthy, i.e. setup
+  # ran and all daemons are up
   smoke:
     needs: check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # yq for building the catalog
+      - uses: jdx/mise-action@v3
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
@@ -64,10 +41,27 @@ jobs:
           tags: container-agent:smoke
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Configuration
+        run: |
+          scripts/build-catalog smoke/catalog
+          mkdir -p smoke/config
+          cat > smoke/config/agent.toml <<'EOF'
+          format = 1
+          catalog = "/catalog"
+
+          [modules]
+          code-server = "latest"
+          sshd = "latest"
+          oh-my-zsh = "latest"
+          gh = "latest"
+          t3 = "latest"
+          codex = "latest"
+          EOF
       - name: Start container
         run: |
           docker run -d --name smoke \
-            -e AGENT_MODULES=code-server,sshd,oh-my-zsh,gh,t3,codex \
+            -v "${PWD}/smoke/config:/etc/container-agent:ro" \
+            -v "${PWD}/smoke/catalog:/catalog:ro" \
             -e CODE_SERVER_PASSWORD=smoke \
             container-agent:smoke
       - name: Wait for healthy
@@ -87,7 +81,11 @@ jobs:
           docker exec smoke agent-run pitchfork list
           for tool in code-server gh t3 codex; do docker exec smoke agent-run which "${tool}"; done
           docker exec smoke agent-run grep -q '^sandbox_mode = "danger-full-access"' /home/agent/.codex/config.toml
+          # module tasks become commands
           for tool in qrencode t3-pair; do docker exec smoke which "${tool}"; done
+          docker exec smoke t3-pair --help
+          # the catalog cache in the home belongs to the agent
+          test "$(docker exec smoke stat -c %U /home/agent/.cache/container-agent/catalog/t3)" = agent
           docker exec smoke agent-run test -d /home/agent/.oh-my-zsh
           docker exec smoke agent-run curl -sf -o /dev/null http://127.0.0.1:8080/healthz
           # module packages come without recommends (xauth is one of openssh-server)
@@ -138,49 +136,19 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # On a v* tag, after the image is out: a GitHub release with the module
-  # registry and the configurator of that version
+  # On a v* tag, after the image is out: a GitHub release with generated
+  # notes. The catalog and the configurator are released on their own, see
+  # pages.yml.
   release:
-    needs: [publish, web]
+    needs: publish
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: configurator
-          path: configurator
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp configurator/registry.json registry.json
-          tar -czf configurator.tar.gz -C configurator .
           gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
-            --title "${GITHUB_REF_NAME}" --generate-notes \
-            registry.json configurator.tar.gz
-
-  # On a v* tag, after the image is out: the configurator of that version on
-  # GitHub Pages (Settings -> Pages -> Source: GitHub Actions)
-  pages:
-    needs: [publish, web]
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: configurator
-          path: configurator
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: configurator
-      - id: deploy
-        uses: actions/deploy-pages@v5
+            --title "${GITHUB_REF_NAME}" --generate-notes

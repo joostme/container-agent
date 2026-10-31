@@ -1,0 +1,30 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "claude"
+description = "Claude Code CLI; log in once with `agent-run claude` and /login"
+version = "1.0.0"
+tags = ["agent", "anthropic"]
+requires = ["node"]
+next_steps = ["Log in once: `agent-run claude`, then type /login in the Claude prompt"]
+
+[env.CLAUDE_CONFIG_DIR]
+type = "path"
+description = "Directory of the Claude config and login. Unset: ~/.claude plus ~/.claude.json."
+
+[mise.tools]
+"npm:@anthropic-ai/claude-code" = { version = "latest", allow_builds = ["@anthropic-ai/claude-code"] }
+
+# Pre-answer the one-time prompts that nobody can answer in a container:
+# onboarding, trust of the workspace and the Remote Control confirmation
+[mise.bootstrap.hooks.post-tools]
+run = '''
+set -e
+f="${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
+mkdir -p "$(dirname "$f")"
+[ -s "$f" ] || echo '{}' > "$f"
+jq --arg ws "$AGENT_WORKSPACE" '.hasCompletedOnboarding = true
+    | .remoteDialogSeen = true
+    | .projects[$ws].hasTrustDialogAccepted = true' "$f" > "$f.tmp"
+cat "$f.tmp" > "$f"
+rm -f "$f.tmp"
+'''
