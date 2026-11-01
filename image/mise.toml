@@ -1,4 +1,4 @@
 #:schema https://mise.jdx.dev/schema/mise.json
-# System mise config of container-agent (/etc/mise/config.toml). It installs
+# System mise config of fitout (/etc/mise/config.toml). It installs
 # nothing itself: the enabled modules add their tools in /etc/mise/conf.d/,
 # and your own config in ~/.config/mise/config.toml overrides both.

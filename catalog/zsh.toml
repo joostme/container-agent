@@ -1,0 +1,32 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "zsh"
+description = "Zsh as the login shell of the user, with the mise tools in every shell"
+version = "1.0.0"
+tags = ["shell"]
+
+[mise.bootstrap.packages]
+"apt:zsh" = "latest"
+
+# Runs as root: fitout sets bash on every start, this switches to zsh
+[mise.bootstrap.hooks.post-packages]
+run = 'usermod -s /usr/bin/zsh "$FITOUT_USER"'
+
+# As fitout does for bash: interactive shells activate mise, non-interactive
+# ones (`zsh -c`, the shell tools of agents) load the container and mise
+# environment
+[mise.bootstrap.hooks.post-tools]
+run = '''
+set -e
+grep -Fq '# fitout zsh' "$HOME/.zshenv" 2>/dev/null || cat >> "$HOME/.zshenv" <<'EOF'
+
+# fitout zsh
+. /run/fitout/env 2>/dev/null || true
+eval "$(mise env -s zsh 2>/dev/null)"
+EOF
+grep -Fq '# fitout zsh' "$HOME/.zshrc" 2>/dev/null || cat >> "$HOME/.zshrc" <<'EOF'
+
+# fitout zsh
+eval "$(mise activate zsh)"
+EOF
+'''

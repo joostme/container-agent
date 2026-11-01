@@ -1,10 +1,9 @@
 import { deflateSync, inflateSync, strFromU8, strToU8, zipSync } from 'fflate';
 import { parse as parseToml } from 'smol-toml';
 import { parse as parseYaml } from 'yaml';
-import { AGENT_HOME, CONFIG_DIR, defaultConfig, type File } from './generate';
+import { CONFIG_DIR, SSH_KEYS, USER_HOME, defaultConfig, type File } from './generate';
 import { fromToml, problems, strings, table, text, toToml } from './module';
-import type { Resolution } from './resolve';
-import type { Config, Doc, Engine } from './types';
+import type { Config, Doc } from './types';
 
 // --- encoding ----------------------------------------------------------------
 
@@ -26,8 +25,8 @@ export const unpack = (data: string) => strFromU8(inflateSync(fromBase64Url(data
 // --- links -------------------------------------------------------------------
 
 /** Settings for the link: only what differs from the defaults, never secrets. */
-export function storedSettings(config: Config, engines: Engine[], secrets: Set<string>): Partial<Config> {
-	const defaults = defaultConfig(engines);
+export function storedSettings(config: Config, secrets: Set<string>): Partial<Config> {
+	const defaults = defaultConfig();
 	const stored: Record<string, unknown> = {};
 	for (const key of Object.keys(defaults) as (keyof Config)[]) {
 		let value: unknown = config[key];
@@ -41,8 +40,8 @@ export function storedSettings(config: Config, engines: Engine[], secrets: Set<s
 
 export type Hash = { kind: 'config'; config: Config } | { kind: 'module'; source: string } | { kind: 'none' };
 
-export function encodeConfig(config: Config, engines: Engine[], secrets: Set<string>): string {
-	return `config=${pack(JSON.stringify(storedSettings(config, engines, secrets)))}`;
+export function encodeConfig(config: Config, secrets: Set<string>): string {
+	return `config=${pack(JSON.stringify(storedSettings(config, secrets)))}`;
 }
 
 /** A module for the `#module=` link: the file as it is. */
@@ -50,13 +49,13 @@ export function encodeModule(doc: Doc): string {
 	return `module=${pack(toToml(doc))}`;
 }
 
-export function decodeHash(hash: string, engines: Engine[]): Hash {
+export function decodeHash(hash: string): Hash {
 	const params = new URLSearchParams(hash.replace(/^#/, ''));
 	try {
 		const module = params.get('module');
 		if (module) return { kind: 'module', source: unpack(module) };
 		const config = params.get('config');
-		if (config) return { kind: 'config', config: normalize(JSON.parse(unpack(config)), engines) };
+		if (config) return { kind: 'config', config: normalize(JSON.parse(unpack(config))) };
 	} catch {
 		// a broken link loads nothing
 	}
@@ -64,8 +63,8 @@ export function decodeHash(hash: string, engines: Engine[]): Hash {
 }
 
 /** Fills gaps and drops what does not fit, so hand-edited settings load. */
-export function normalize(input: unknown, engines: Engine[]): Config {
-	const base = defaultConfig(engines);
+export function normalize(input: unknown): Config {
+	const base = defaultConfig();
 	const raw = table(input);
 	const result = { ...base } as Record<keyof Config, unknown>;
 	const stringMap = (value: unknown) =>
@@ -73,7 +72,8 @@ export function normalize(input: unknown, engines: Engine[]): Config {
 	for (const key of Object.keys(base) as (keyof Config)[]) {
 		const value = raw[key];
 		if (value === undefined) continue;
-		if (key === 'modules' || key === 'pins' || key === 'values') result[key] = stringMap(value);
+		if (key === 'modules') result[key] = strings(value);
+		else if (key === 'values') result[key] = stringMap(value);
 		else if (key === 'custom') result[key] = Array.isArray(value) ? value.map(table) : [];
 		else if (typeof value === typeof base[key]) result[key] = value;
 	}
@@ -90,7 +90,7 @@ export interface Review {
 	secrets: string[];
 }
 
-export function review(source: string, formats: number[]): Review {
+export function review(source: string): Review {
 	const doc = fromToml(source);
 	const hooks = table(table(table(doc.mise).bootstrap).hooks);
 	const root: Review['root'] = [];
@@ -102,7 +102,7 @@ export function review(source: string, formats: number[]): Review {
 	const secrets = Object.entries(table(doc.env))
 		.filter(([, spec]) => table(spec).type === 'secret')
 		.map(([name]) => name);
-	return { doc, problems: problems(doc, formats), root, secrets };
+	return { doc, problems: problems(doc), root, secrets };
 }
 
 // --- loading files back ------------------------------------------------------------
@@ -114,27 +114,18 @@ export interface Imported {
 
 type Yaml = Record<string, unknown>;
 
-function readAgentToml(source: string, config: Config, notes: string[]) {
+function readConfigToml(source: string, config: Config, catalog: Map<string, unknown>, notes: string[]) {
 	const doc = parseToml(source) as Doc;
-	config.modules = {};
-	config.pins = {};
-	for (const [name, spec] of Object.entries(table(doc.modules))) {
-		if (typeof spec !== 'string') continue;
-		if (spec === 'local') {
-			if (!config.custom.some((m) => m.name === name)) {
-				notes.push(`agent.toml enables modules/${name}.toml; load that file too.`);
-			}
-		} else {
-			config.modules[name] = spec;
-		}
+	const custom = new Set(config.custom.map((m) => text(m.name)));
+	config.modules = [];
+	for (const name of strings(doc.modules)) {
+		if (custom.has(name)) continue;
+		if (catalog.has(name)) config.modules.push(name);
+		else notes.push(`fitout.toml enables ${name}, which is not in the catalog; load modules/${name}.toml too.`);
 	}
 	config.values = Object.fromEntries(
 		Object.entries(table(doc.env)).map(([name, value]) => [name, text(value)])
 	);
-	if (typeof doc.puid === 'number') config.puid = String(doc.puid);
-	if (typeof doc.pgid === 'number') config.pgid = String(doc.pgid);
-	if (typeof doc.workspace === 'string') config.workspace = doc.workspace;
-	config.autoUpdate = doc.auto_update !== false;
 	config.catalog = typeof doc.catalog === 'string' ? doc.catalog : '';
 }
 
@@ -147,26 +138,30 @@ function readCompose(source: string, config: Config, files: File[]) {
 	];
 	const entry =
 		services.find(([, svc]) => mounts(table(svc)).some((t) => t.startsWith(CONFIG_DIR))) ??
-		services.find(([, svc]) => text(table(svc).image).includes('container-agent'));
-	if (!entry) throw new Error(`No container-agent service found: none mounts ${CONFIG_DIR}.`);
+		services.find(([, svc]) => text(table(svc).image).includes('fitout'));
+	if (!entry) throw new Error(`No fitout service found: none mounts ${CONFIG_DIR}.`);
 	const [name, raw] = entry;
 	const service = table(raw);
 	config.service = name;
 	config.image = text(service.image).split(':').at(-1) || config.image;
 	const env = service.environment;
-	config.tz = Array.isArray(env)
-		? (strings(env).find((e) => e.startsWith('TZ='))?.slice(3) ?? '')
-		: text(table(env).TZ);
+	const variable = (name: string) =>
+		Array.isArray(env)
+			? (strings(env)
+					.find((e) => e.startsWith(`${name}=`))
+					?.slice(name.length + 1) ?? '')
+			: text(table(env)[name]);
+	config.tz = variable('TZ');
+	config.puid = variable('PUID') || config.puid;
+	config.pgid = variable('PGID') || config.pgid;
 
 	const volumes = strings(service.volumes).map((v) => v.split(':'));
 	const hostOf = (target: string) => volumes.find((parts) => parts[1] === target)?.[0];
-	const home = hostOf(AGENT_HOME);
+	const home = hostOf(USER_HOME);
 	if (home) config.dataDir = home.replace(/\/home$/, '');
-	config.sshKeys = hostOf(`${AGENT_HOME}/.ssh-keys`) ?? '';
-	const repos = volumes.find((parts) => parts[0] === `${config.dataDir}/repos`);
-	if (repos?.[1]) config.workspace = repos[1];
+	config.sshKeys = hostOf(SSH_KEYS) ?? '';
 
-	// agent.toml and modules inside compose.yaml
+	// fitout.toml and modules inside compose.yaml
 	const configs = table(doc.configs);
 	config.inline = false;
 	for (const mount of Array.isArray(service.configs) ? service.configs : []) {
@@ -179,11 +174,11 @@ function readCompose(source: string, config: Config, files: File[]) {
 }
 
 /**
- * Settings from files the configurator wrote: compose.yaml, agent.toml and
+ * Settings from files the configurator wrote: compose.yaml, fitout.toml and
  * module files, in any combination. Secrets live in .env and are not read.
  */
-export function importFiles(input: File[], engines: Engine[]): Imported {
-	const config = defaultConfig(engines);
+export function importFiles(input: File[], catalog: Map<string, unknown>): Imported {
+	const config = defaultConfig();
 	const notes: string[] = [];
 	const files = [...input];
 	const composeFile = files.find((f) => /\.ya?ml$/.test(f.path) || /^\s*services\s*:/m.test(f.text));
@@ -197,32 +192,15 @@ export function importFiles(input: File[], engines: Engine[]): Imported {
 			throw new Error(`${f.path}: not valid TOML (${(error as Error).message})`);
 		}
 	});
-	// modules first, so agent.toml finds them
+	// modules first, so fitout.toml finds them
 	for (const { doc } of parsed) if (typeof doc.name === 'string') config.custom.push(doc);
-	const agent = parsed.find(({ doc }) => typeof doc.name !== 'string' && ('modules' in doc || 'format' in doc));
-	if (agent) readAgentToml(agent.file.text, config, notes);
-	else if (!composeFile && !config.custom.length) throw new Error('Neither compose.yaml, agent.toml nor a module.');
-	if (!agent && composeFile && !config.inline) {
-		notes.push('compose.yaml mounts a config folder; load its agent.toml and modules too.');
+	const settings = parsed.find(({ doc }) => typeof doc.name !== 'string' && ('modules' in doc || 'format' in doc));
+	if (settings) readConfigToml(settings.file.text, config, catalog, notes);
+	else if (!composeFile && !config.custom.length) throw new Error('Neither compose.yaml, fitout.toml nor a module.');
+	if (!settings && composeFile && !config.inline) {
+		notes.push('compose.yaml mounts a config folder; load its fitout.toml and modules too.');
 	}
 	return { config, notes };
-}
-
-/**
- * After loading agent.toml, modules that others require move from the picked
- * ones to the pins: they keep their version but come and go with the modules
- * that need them.
- */
-export function demoteRequired(config: Config, resolution: Resolution): Config {
-	const modules = { ...config.modules };
-	const pins = { ...config.pins };
-	for (const name of Object.keys(modules)) {
-		if (resolution.requiredBy.get(name)?.some((by) => by !== name)) {
-			pins[name] = modules[name];
-			delete modules[name];
-		}
-	}
-	return { ...config, modules, pins };
 }
 
 // --- download -----------------------------------------------------------------------

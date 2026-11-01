@@ -8,31 +8,23 @@ ARG PITCHFORK_VERSION=2.32.3
 ARG YQ_VERSION=4.54.1
 ARG TARGETARCH
 
-# Base tools for agents and the entrypoint. Anything else comes from mise:
-# tools from [tools], extra apt packages from [bootstrap.packages].
+# Only what fitout, mise and pitchfork need: downloads (curl, certificates),
+# unpacking (unzip, xz; tar and gzip are part of Debian), jq and gosu for the
+# entrypoint. Everything else comes from modules, e.g. git and compilers from
+# the devtools module.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash \
-    build-essential \
     ca-certificates \
     curl \
-    git \
     gosu \
-    gzip \
     jq \
-    less \
-    openssh-client \
-    procps \
-    ripgrep \
-    tar \
     unzip \
     xz-utils \
-    zsh \
     && rm -rf /var/lib/apt/lists/*
 
 # Packages from [bootstrap.packages] come without recommends; openssh-server
 # would otherwise pull in dbus, xauth and more
 RUN printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n' \
-        > /etc/apt/apt.conf.d/99container-agent
+        > /etc/apt/apt.conf.d/99fitout
 
 # mise, pitchfork and yq are pinned here (Renovate bumps them) instead of
 # self-updating on start, so a new release cannot break a running setup
@@ -52,22 +44,22 @@ RUN set -eux; \
     chmod +x /usr/local/bin/mise /usr/local/bin/pitchfork /usr/local/bin/yq; \
     mise --version; pitchfork --version; yq --version
 
-# The image carries no modules: agent.toml in /etc/container-agent names
-# them, and the entrypoint downloads them from the catalog
+# The image carries no modules: fitout.toml in /etc/fitout names them, and
+# the entrypoint downloads them from the catalog
 COPY image/mise.toml /etc/mise/config.toml
-COPY image/container-agent image/agent-run /usr/local/bin/
+COPY image/fitout /usr/local/bin/
 
-# No PUID/PGID defaults here: they would always win over agent.toml
+# No PUID/PGID defaults here: they would always win over fitout.toml
 ENV PITCHFORK_SUPERVISOR_AUTO_START=false
 
 # Commands from the tasks of the enabled modules and the mise shims of the
-# agent user, both made on start, so `docker exec` finds them without a login shell
-ENV PATH="/run/container-agent/bin:/run/container-agent/shims:${PATH}"
+# user, both made on start, so `docker exec` finds them without a login shell
+ENV PATH="/run/fitout/bin:/run/fitout/shims:${PATH}"
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=600s --retries=3 \
-    CMD ["container-agent", "health"]
+    CMD ["fitout", "health"]
 
-WORKDIR /repos
+WORKDIR /workspace
 
-ENTRYPOINT ["container-agent"]
+ENTRYPOINT ["fitout"]
 CMD ["start"]

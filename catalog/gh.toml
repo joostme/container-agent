@@ -4,7 +4,8 @@ name = "gh"
 description = "GitHub CLI (gh); uses GH_TOKEN or GITHUB_TOKEN if set"
 version = "1.0.0"
 tags = ["git", "github", "cli"]
-next_steps = ["Set GH_TOKEN, or log in once: `agent-run gh auth login`"]
+requires = ["git"]
+next_steps = ["Set GH_TOKEN, or log in once: `fitout run gh auth login`"]
 
 [env.GH_TOKEN]
 type = "secret"

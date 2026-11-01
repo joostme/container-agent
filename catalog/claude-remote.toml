@@ -8,7 +8,7 @@ requires = ["claude"]
 next_steps = ["After the login the container shows up in claude.ai/code and the Claude apps under CLAUDE_REMOTE_NAME"]
 
 [env.CLAUDE_REMOTE_NAME]
-default = "container-agent"
+default = "fitout"
 description = "Name in the session list of claude.ai/code and the apps"
 
 [env.CLAUDE_REMOTE_SPAWN]
@@ -23,10 +23,10 @@ choices = ["auto", "default", "acceptEdits", "plan"]
 default = "auto"
 description = "Permission mode of new sessions"
 
-# Finishes once Claude is logged in (`agent-run claude`, then /login)
+# Finishes once Claude is logged in (`fitout run claude`, then /login)
 [daemons.claude-remote-login]
 run = '''
-claude auth status > /dev/null 2>&1 || echo "Waiting for a Claude login: agent-run claude, then /login"
+claude auth status > /dev/null 2>&1 || echo "Waiting for a Claude login: fitout run claude, then /login"
 until claude auth status > /dev/null 2>&1; do sleep 30; done
 '''
 oneshot = true

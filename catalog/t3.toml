@@ -4,8 +4,7 @@ name = "t3"
 description = "T3 Code server for the T3 web, desktop and mobile apps; drives Claude, Codex, OpenCode and more"
 version = "1.0.0"
 tags = ["remote control", "web ui"]
-requires = ["node"]
-after = ["claude", "codex", "opencode"]
+requires = ["node", "git"]
 next_steps = ["Pair the T3 app or a browser: `t3-pair` (set T3_PUBLIC_URL or T3_PUBLIC_HOST first, so the link works from other devices)"]
 
 [env.T3_PORT]

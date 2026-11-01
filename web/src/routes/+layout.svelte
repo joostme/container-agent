@@ -7,8 +7,8 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-	<title>container-agent configurator</title>
-	<meta name="description" content="Pick the agents and remote UIs for container-agent and get a ready compose.yaml." />
+	<title>fitout configurator</title>
+	<meta name="description" content="Fit out a container: pick tools, apps and services from the catalog and get a ready compose.yaml." />
 </svelte:head>
 
 {@render children()}

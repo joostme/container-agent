@@ -1,0 +1,12 @@
+#:schema https://raw.githubusercontent.com/joostme/fitout/main/schema/v1/fitout.schema.json
+format = 1
+
+# the configurator lists the catalog: https://joostme.github.io/fitout/
+# a file in modules/ replaces the catalog module of its name (modules/java.toml for "java")
+modules = ["claude-remote", "t3", "code-server", "gh", "devtools", "zsh"]
+
+[env]
+CLAUDE_REMOTE_NAME = "my-box"
+# reverse proxy URL or LAN address for pairing links (t3-pair)
+# T3_PUBLIC_URL = "https://t3.example.org"
+# T3_PUBLIC_HOST = "192.168.1.10"

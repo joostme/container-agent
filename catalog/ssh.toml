@@ -1,0 +1,25 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "ssh"
+description = "SSH client; copies the keys mounted at ~/.ssh-keys into ~/.ssh"
+version = "1.0.0"
+tags = ["ssh"]
+next_steps = ["Mount your SSH keys read-only at /home/fitout/.ssh-keys: keys for git, or authorized_keys for sshd"]
+
+[mise.bootstrap.packages]
+"apt:openssh-client" = "latest"
+
+# Runs as root, so it can read keys the user cannot. The copies belong to the
+# user and get the permissions ssh insists on; new hosts are accepted on
+# first use.
+[mise.bootstrap.hooks.post-packages]
+run = '''
+set -e
+dir="$FITOUT_HOME/.ssh"
+mkdir -p "$dir"
+[ ! -d "$FITOUT_HOME/.ssh-keys" ] || cp -a "$FITOUT_HOME/.ssh-keys/." "$dir/"
+[ -f "$dir/config" ] || printf 'Host *\n    StrictHostKeyChecking accept-new\n' > "$dir/config"
+chown -R "$PUID:$PGID" "$dir"
+chmod 700 "$dir"
+chmod 600 "$dir/config" "$dir/authorized_keys" "$dir/id_"* 2>/dev/null || true
+'''

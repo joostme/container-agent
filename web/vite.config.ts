@@ -13,6 +13,8 @@ export default defineConfig({
 			adapter: adapter()
 		})
 	],
+	// the catalog is bundled from ../catalog
+	server: { fs: { allow: ['..'] } },
 	test: {
 		expect: { requireAssertions: true },
 		projects: [
@@ -26,7 +28,7 @@ export default defineConfig({
 				}
 			},
 			{
-				// the page itself, mounted in jsdom with the catalog read from disk
+				// the page itself, mounted in jsdom
 				extends: './vite.config.ts',
 				resolve: { conditions: ['browser'] },
 				test: {

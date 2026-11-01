@@ -3,8 +3,10 @@ import { VAR_TYPES, type Doc, type EnvVar, type Module, type VarType } from './t
 
 export const NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 export const VAR_PATTERN = /^[A-Z][A-Z0-9_]*$/;
+/** The module format the image reads (FORMATS in image/fitout). */
+export const FORMAT = 1;
 export const SCHEMA_URL =
-	'https://raw.githubusercontent.com/joostme/container-agent/main/schema/v1/module.schema.json';
+	'https://raw.githubusercontent.com/joostme/fitout/main/schema/v1/module.schema.json';
 
 export const table = (v: unknown): Doc => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Doc) : {});
 export const text = (v: unknown): string =>
@@ -43,10 +45,9 @@ export function describe(doc: Doc): Module {
 		description: text(doc.description),
 		version: text(doc.version),
 		format: typeof doc.format === 'number' ? doc.format : null,
+		homepage: text(doc.homepage) || null,
 		tags: strings(doc.tags),
 		requires: strings(doc.requires),
-		after: strings(doc.after),
-		arch: Array.isArray(doc.arch) ? strings(doc.arch) : null,
 		nextSteps: strings(doc.next_steps),
 		env: Object.entries(table(doc.env)).map(([name, raw]) => envVar(name, raw)),
 		commands: Object.keys(table(mise.tasks)),
@@ -60,19 +61,19 @@ const unknown = (doc: Doc, allowed: string[]) => Object.keys(doc).filter((k) => 
 
 /**
  * What the entrypoint would refuse, so the configurator says it first. Same
- * rules as validate_module in image/container-agent, plus the form checks.
+ * rules as validate_module in image/fitout, plus the form checks.
  */
-export function problems(doc: Doc, formats: number[] = [1]): string[] {
+export function problems(doc: Doc): string[] {
 	const result: string[] = [];
 	const name = text(doc.name);
-	if (!formats.includes(doc.format as number)) {
-		result.push(`format ${text(doc.format) || 'missing'}; this image reads format ${formats.join(', ')}`);
+	if (doc.format !== FORMAT) {
+		result.push(`format ${text(doc.format) || 'missing'}; the image reads format ${FORMAT}`);
 	}
 	if (!NAME_PATTERN.test(name)) result.push('the name may only contain lower-case letters, digits and dashes');
 	if (!text(doc.description)) result.push('description missing');
 	for (const key of unknown(doc, [
 		'format', 'name', 'description', 'version', 'tags', 'author', 'homepage',
-		'requires', 'after', 'arch', 'next_steps', 'env', 'mise', 'daemons'
+		'requires', 'next_steps', 'env', 'mise', 'daemons'
 	])) {
 		result.push(`unknown field ${key}`);
 	}
@@ -106,7 +107,7 @@ export function problems(doc: Doc, formats: number[] = [1]): string[] {
 }
 
 export function emptyModule(name: string): Doc {
-	return { format: 1, name, description: '' };
+	return { format: FORMAT, name, description: '' };
 }
 
 /** Drops empty tables and values the forms leave behind. */
@@ -127,7 +128,7 @@ function prune(value: unknown): unknown {
 
 const FIELD_ORDER = [
 	'format', 'name', 'description', 'version', 'tags', 'author', 'homepage',
-	'requires', 'after', 'arch', 'next_steps', 'env', 'mise', 'daemons'
+	'requires', 'next_steps', 'env', 'mise', 'daemons'
 ];
 
 /** The module file, with the schema line editors use. */

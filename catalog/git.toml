@@ -1,0 +1,19 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "git"
+description = "Git with less as its pager, trusting every repository in the container"
+version = "1.0.0"
+tags = ["git"]
+requires = ["ssh"]
+
+[mise.bootstrap.packages]
+"apt:git" = "latest"
+"apt:less" = "latest"
+
+# The container has one user, but mounted repositories often belong to
+# another UID; git would refuse to work in them
+[mise.bootstrap.hooks.post-tools]
+run = '''
+git config --global --get-all safe.directory 2>/dev/null | grep -Fxq '*' \
+    || git config --global --add safe.directory '*'
+'''

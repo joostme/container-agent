@@ -12,7 +12,7 @@ shellcheck = "latest"
 [tasks.lint]
 description = "Check the shell scripts, the TOML files against their schemas and the pinned versions"
 run = [
-    "shellcheck image/container-agent image/agent-run scripts/* tests/run",
+    "shellcheck image/fitout scripts/* tests/run",
     "tombi lint image/mise.toml catalog/*.toml",
     "scripts/check-versions",
     "scripts/check-catalog",

@@ -4,7 +4,8 @@ name = "codex"
 description = "OpenAI Codex CLI, e.g. as a provider in T3 Code"
 version = "1.0.0"
 tags = ["agent", "openai"]
-next_steps = ["Log in once: `agent-run codex login --device-auth`"]
+requires = ["git"]
+next_steps = ["Log in once: `fitout run codex login --device-auth`"]
 
 [env.CODEX_HOME]
 type = "path"
@@ -23,7 +24,7 @@ f="${CODEX_HOME:-$HOME/.codex}/config.toml"
 mkdir -p "$(dirname "$f")"
 touch "$f"
 if ! grep -Eq '^[[:space:]]*sandbox_mode[[:space:]]*=' "$f"; then
-    { printf '# Added by container-agent: the container is the sandbox\nsandbox_mode = "danger-full-access"\n\n'
+    { printf '# Added by fitout: the container is the sandbox\nsandbox_mode = "danger-full-access"\n\n'
       cat "$f"; } > "$f.tmp"
     mv "$f.tmp" "$f"
 fi

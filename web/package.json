@@ -1,5 +1,5 @@
 {
-	"name": "container-agent-configurator",
+	"name": "fitout-configurator",
 	"private": true,
 	"version": "0.0.1",
 	"type": "module",
@@ -30,5 +30,5 @@
 	"imports": {
 		"#lib/*": "./src/lib/*"
 	},
-	"description": "Static configurator that turns catalog and custom modules into agent.toml and compose.yaml"
+	"description": "Static configurator that turns catalog and custom modules into fitout.toml and compose.yaml"
 }

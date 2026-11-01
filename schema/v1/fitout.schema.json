@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/joostme/fitout/main/schema/v1/fitout.schema.json",
+  "title": "fitout configuration, format 1",
+  "description": "fitout.toml in /etc/fitout: the modules of a container and their values.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format"
+  ],
+  "properties": {
+    "format": {
+      "description": "Version of this format.",
+      "const": 1
+    },
+    "catalog": {
+      "description": "URL (or absolute path) of the folder with the module files, by default the catalog folder of the fitout repository on main. Put a tag or commit instead of main to stay on one state.",
+      "type": "string",
+      "minLength": 1
+    },
+    "modules": {
+      "description": "Enabled modules by name. A file modules/<name>.toml in the config folder replaces the catalog module of that name. Modules they require come along.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]*$"
+      }
+    },
+    "env": {
+      "description": "Values of module variables, not for secrets. The container environment wins.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Z][A-Z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": [
+          "string",
+          "integer",
+          "boolean"
+        ]
+      }
+    }
+  }
+}

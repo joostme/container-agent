@@ -1,13 +1,12 @@
-name: Catalog and configurator
+name: Configurator
 
-# The catalog and the configurator are released together on every push to
-# main, independent of image releases. Tags deploy too, so the configurator
-# learns the new image version. Pages has to be enabled once under
-# Settings -> Pages -> Source: GitHub Actions.
+# Checks the catalog and deploys the configurator, with the catalog of the
+# commit built in, on every push to main. The image reads the catalog straight
+# from the repository. Pages has to be enabled once under Settings -> Pages ->
+# Source: GitHub Actions.
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -19,23 +18,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # the whole history: every module version and the image tags
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - uses: jdx/mise-action@v3
-      - name: Check the catalog
-        env:
-          BEFORE: ${{ github.event.before }}
-        run: |
-          case "${GITHUB_EVENT_NAME}" in
-            pull_request) base="origin/${GITHUB_BASE_REF}" ;;
-            push) base="${BEFORE}" ;;
-            *) base="" ;;
-          esac
-          # new branches and tags have no previous commit
-          git cat-file -e "${base}^{commit}" 2> /dev/null || base=""
-          scripts/check-catalog ${base:+"${base}"}
+      - run: scripts/check-catalog
       - name: Configurator
         working-directory: web
         run: |

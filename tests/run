@@ -1,16 +1,17 @@
 #!/bin/bash
-# Tests of the entrypoint: resolving agent.toml and the catalog, checks, and
-# the generated mise and pitchfork config. They run `container-agent plan`
-# and `modules`, which need no root and no container.
+# Tests of the entrypoint: resolving fitout.toml and the catalog, checks, and
+# the generated mise and pitchfork config. They run `fitout plan`, which
+# needs no root and no container.
 # shellcheck disable=SC2015  # `check && pass || fail` is safe, pass never fails
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-CA="${PWD}/image/container-agent"
+FITOUT="${PWD}/image/fitout"
 WORK=$(mktemp -d)
 trap 'rm -rf "${WORK}"' EXIT
+# a copy, so tests can change it
 CATALOG="${WORK}/catalog"
-scripts/build-catalog "${CATALOG}" > /dev/null || { echo "building the catalog failed"; exit 1; }
+cp -r catalog "${CATALOG}"
 failures=0
 
 pass() { echo "ok   $1"; }
@@ -20,12 +21,12 @@ fail() {
     failures=$((failures + 1))
 }
 
-# A config folder: agent.toml from $1 (catalog line added), modules from $2...
+# A config folder: fitout.toml from $1 (catalog line added), modules from $2...
 config() {
     local dir module
     dir=$(mktemp -d "${WORK}/config-XXXX")
     mkdir -p "${dir}/modules"
-    printf 'format = 1\ncatalog = "%s"\n%s\n' "${CATALOG}" "$1" > "${dir}/agent.toml"
+    printf 'format = 1\ncatalog = "%s"\n%s\n' "${CATALOG}" "$1" > "${dir}/fitout.toml"
     shift
     for module in "$@"; do
         printf '%s\n' "${module}" > "${dir}/modules/$(sed -n 's/^name = "\(.*\)"/\1/p' <<< "${module}").toml"
@@ -37,13 +38,13 @@ config() {
 plan() {
     local dir=$1
     shift
-    env -i PATH="${PATH}" HOME="${HOME}" CONTAINER_AGENT_CONFIG="${dir}" \
-        CONTAINER_AGENT_CACHE="${dir}/cache" "$@" "${CA}" plan 2>&1
+    env -i PATH="${PATH}" HOME="${HOME}" FITOUT_CONFIG="${dir}" \
+        FITOUT_CACHE="${dir}/cache" "$@" "${FITOUT}" plan 2>&1
 }
 
 order_of() { sed -n '/^# Modules/,/^$/p' <<< "$1" | awk 'NR > 1 && NF { print $1 }' | paste -sd' '; }
 
-expect_order() {  # name, agent.toml body, expected order
+expect_order() {  # name, fitout.toml body, expected order
     local out order
     out=$(plan "$(config "$2")")
     order=$(order_of "${out}")
@@ -70,100 +71,92 @@ expect_line() {  # name, line, config dir, env...
 }
 
 # --- resolution and order -------------------------------------------------
-expect_order "requires pulls in claude and node, after orders t3" \
-    $'[modules]\nt3 = "1.0.0"\nclaude-remote = "1.0.0"' "node claude claude-remote t3"
-expect_order "after only orders enabled modules" \
-    $'[modules]\nt3 = "1.0.0"\ncodex = "1.0.0"' "codex node t3"
+expect_order "requires pulls in claude, git and node, before the modules that need them" \
+    'modules = ["t3", "claude-remote"]' "node ssh git claude claude-remote t3"
+expect_order "modules follow their names where nothing requires otherwise" \
+    'modules = ["t3", "codex"]' "ssh git codex node t3"
 expect_order "no modules" "" ""
-expect_line "a pinned version comes from the catalog" "gh               catalog 1.0.0" \
-    "$(config $'[modules]\ngh = "1.0.0"')"
-expect_line "latest picks the newest version" "gh               catalog 1.0.0" \
-    "$(config $'[modules]\ngh = "latest"')"
+expect_line "a module comes from the catalog, with its version" "gh               catalog 1.0.0" \
+    "$(config 'modules = ["gh"]')"
+expect_error "a module not in the catalog" "nope is not in the catalog" "$(config 'modules = ["nope"]')"
+expect_error "a module name that is no name" "../gh is no module name" "$(config 'modules = ["../gh"]')"
+expect_error "modules is a list" "modules is a list of module names" "$(config $'[modules]\ngh = "1.0.0"')"
+sed -i 's/^format = 1$/format = 2/' "${CATALOG}/go.toml"
+expect_error "a module in another format stops the start" "uses format 2" "$(config 'modules = ["go"]')"
+cp catalog/go.toml "${CATALOG}/go.toml"
 
-# a newer version in a format this engine cannot read
-mkdir -p "${CATALOG}/gh"
-sed 's/^format = 1$/format = 2/; s/^version = .*/version = "9.0.0"/' catalog/gh.toml > "${CATALOG}/gh/9.0.0.toml"
-jq --arg sha "$(sha256sum "${CATALOG}/gh/9.0.0.toml" | cut -d' ' -f1)" \
-    '.modules.gh.versions["9.0.0"] = {format: 2, sha256: $sha, date: "2030-01-01"}' \
-    "${CATALOG}/index.json" > "${CATALOG}/index.json.tmp" && mv "${CATALOG}/index.json.tmp" "${CATALOG}/index.json"
-expect_line "latest skips versions in an unknown format" "gh               catalog 1.0.0" \
-    "$(config $'[modules]\ngh = "latest"')"
-expect_error "a pinned version in an unknown format stops the start" "uses format 2" \
-    "$(config $'[modules]\ngh = "9.0.0"')"
-expect_error "a version not in the catalog" "gh 8.0.0 is not in the catalog" "$(config $'[modules]\ngh = "8.0.0"')"
-expect_error "a module not in the catalog" "nope is not in the catalog" "$(config $'[modules]\nnope = "latest"')"
-
-# --- download, checksum, cache --------------------------------------------
-dir=$(config $'[modules]\ncodex = "1.0.0"')
-cp "${CATALOG}/codex/1.0.0.toml" "${WORK}/codex.toml"
-echo "# changed" >> "${CATALOG}/codex/1.0.0.toml"
-expect_error "a file that does not match the index is rejected" "does not match the checksum" "${dir}"
-cp "${WORK}/codex.toml" "${CATALOG}/codex/1.0.0.toml"
+# --- download and cache -------------------------------------------------------
+dir=$(config 'modules = ["codex"]')
 plan "${dir}" > /dev/null
+sed -i 's/^description = .*/description = "changed"/' "${CATALOG}/codex.toml"
+plan "${dir}" > /dev/null
+grep -q '^description = "changed"' "${dir}/cache/catalog/codex.toml" \
+    && pass "every start takes the current catalog" || fail "every start takes the current catalog"
 mv "${CATALOG}" "${WORK}/catalog-away"
-expect_line "pinned modules start from the cache without the catalog" "codex            catalog 1.0.0" "${dir}"
-expect_error "an uncached module needs the catalog" "not reachable" "$(config $'[modules]\ngh = "1.0.0"')"
+expect_line "without the catalog, modules come from the cache" "codex            catalog 1.0.0" "${dir}"
+expect_error "an uncached module needs the catalog" "not reachable" "$(config 'modules = ["gh"]')"
 mv "${WORK}/catalog-away" "${CATALOG}"
+cp catalog/codex.toml "${CATALOG}/codex.toml"
 
 # --- local modules ----------------------------------------------------------
 mine=$'format = 1\nname = "mine"\ndescription = "mine"\nrequires = ["gh"]\n[env.MINE_PORT]\ntype = "port"\nprotocol = "http"\ndefault = "9000"\n[mise.tools]\njava = "21"\n[mise.tasks.mine-hello]\nrun = "echo hello"\n[daemons.mine]\nrun = "exec sleep 1000"\n[daemons.mine-root]\nrun = "exec sleep 1000"\nuser = "root"'
-dir=$(config $'[modules]\nmine = "local"' "${mine}")
+dir=$(config 'modules = ["mine"]' "${mine}")
 expect_line "a local module comes from modules/" "mine             local" "${dir}"
 expect_line "its requires come from the catalog" "gh               catalog 1.0.0" "${dir}"
 expect_line "its [mise] goes to conf.d" 'java = "21"' "${dir}"
 expect_line "its tasks become commands" "mine-hello" "${dir}"
 expect_line "daemons start on boot by default" "boot_start = true" "${dir}"
-expect_line "daemons run in the workspace by default" 'dir = "/repos"' "${dir}"
+expect_line "daemons run in the workspace by default" 'dir = "/workspace"' "${dir}"
 expect_line "root daemons run without mise by default" "mise = false" "${dir}"
 gh_local=$'format = 1\nname = "gh"\ndescription = "my gh"'
-expect_line "a local file wins for a required module" "gh               local" \
-    "$(config $'[modules]\nmine = "local"' "${mine}" "${gh_local}")"
-expect_error "a local module that is missing" "does not exist" "$(config $'[modules]\nmissing = "local"')"
+expect_line "a local file replaces a catalog module" "gh               local" \
+    "$(config 'modules = ["mine"]' "${mine}" "${gh_local}")"
 expect_error "a module with an unknown field" "unknown field foo" \
-    "$(config $'[modules]\nbad = "local"' $'format = 1\nname = "bad"\ndescription = "x"\nfoo = 1')"
+    "$(config 'modules = ["bad"]' $'format = 1\nname = "bad"\ndescription = "x"\nfoo = 1')"
 expect_error "a module with mise.env" "mise.env is not allowed" \
-    "$(config $'[modules]\nbad = "local"' $'format = 1\nname = "bad"\ndescription = "x"\n[mise.env]\nX = "1"')"
+    "$(config 'modules = ["bad"]' $'format = 1\nname = "bad"\ndescription = "x"\n[mise.env]\nX = "1"')"
 expect_error "a module with another hook" "hook pre-tools is not allowed" \
-    "$(config $'[modules]\nbad = "local"' $'format = 1\nname = "bad"\ndescription = "x"\n[mise.bootstrap.hooks.pre-tools]\nrun = "x"')"
-dir=$(config $'[modules]\nbad = "local"' $'format = 1\nname = "other"\ndescription = "x"')
+    "$(config 'modules = ["bad"]' $'format = 1\nname = "bad"\ndescription = "x"\n[mise.bootstrap.hooks.pre-tools]\nrun = "x"')"
+dir=$(config 'modules = ["bad"]' $'format = 1\nname = "other"\ndescription = "x"')
 mv "${dir}/modules/other.toml" "${dir}/modules/bad.toml"
 expect_error "a module whose name differs from its file" "its name is other" "${dir}"
-expect_error "a cycle" "depends on itself" \
-    "$(config $'[modules]\na = "local"' $'format = 1\nname = "a"\ndescription = "a"\nrequires = ["b"]' $'format = 1\nname = "b"\ndescription = "b"\nafter = ["a"]')"
+expect_error "a cycle" "requires itself" \
+    "$(config 'modules = ["a"]' $'format = 1\nname = "a"\ndescription = "a"\nrequires = ["b"]' $'format = 1\nname = "b"\ndescription = "b"\nrequires = ["a"]')"
 expect_error "the same task in two modules" "task t3-pair is defined by" \
-    "$(config $'[modules]\nt3 = "1.0.0"\ndup = "local"' $'format = 1\nname = "dup"\ndescription = "x"\n[mise.tasks.t3-pair]\nrun = "x"')"
+    "$(config 'modules = ["t3", "dup"]' $'format = 1\nname = "dup"\ndescription = "x"\n[mise.tasks.t3-pair]\nrun = "x"')"
 
 # --- values -----------------------------------------------------------------
-expect_line "a default fills an unset variable" "T3_PORT=3773" "$(config $'[modules]\nt3 = "1.0.0"')"
-expect_line "agent.toml wins over the default" "T3_PORT=4000" "$(config $'[modules]\nt3 = "1.0.0"\n[env]\nT3_PORT = 4000')"
-expect_line "the environment wins over agent.toml" "T3_PORT=5000" \
-    "$(config $'[modules]\nt3 = "1.0.0"\n[env]\nT3_PORT = 4000')" T3_PORT=5000
-expect_error "a secret in agent.toml" "OPENCODE_SERVER_PASSWORD is a secret" \
-    "$(config $'[modules]\nopencode = "1.0.0"\n[env]\nOPENCODE_SERVER_PASSWORD = "x"')"
+expect_line "a default fills an unset variable" "T3_PORT=3773" "$(config 'modules = ["t3"]')"
+expect_line "fitout.toml wins over the default" "T3_PORT=4000" "$(config $'modules = ["t3"]\n[env]\nT3_PORT = 4000')"
+expect_line "the environment wins over fitout.toml" "T3_PORT=5000" \
+    "$(config $'modules = ["t3"]\n[env]\nT3_PORT = 4000')" T3_PORT=5000
+expect_error "a secret in fitout.toml" "OPENCODE_SERVER_PASSWORD is a secret" \
+    "$(config $'modules = ["opencode"]\n[env]\nOPENCODE_SERVER_PASSWORD = "x"')"
 expect_error "a required variable without value" "OPENCODE_SERVER_PASSWORD is required" \
-    "$(config $'[modules]\nopencode = "1.0.0"')"
+    "$(config 'modules = ["opencode"]')"
 expect_line "secrets come from the environment and stay hidden" "OPENCODE_SERVER_PASSWORD=***" \
-    "$(config $'[modules]\nopencode = "1.0.0"')" OPENCODE_SERVER_PASSWORD=s3cret
+    "$(config 'modules = ["opencode"]')" OPENCODE_SERVER_PASSWORD=s3cret
 expect_line "[env] a module does not declare still reaches the container" "TZ=Europe/Berlin" \
-    "$(config $'[modules]\ngh = "1.0.0"\n[env]\nTZ = "Europe/Berlin"')"
-expect_line "puid from agent.toml" "PUID=99" "$(config $'puid = 99\n[modules]')"
-expect_line "PUID from the environment wins" "PUID=1234" "$(config $'puid = 99\n[modules]')" PUID=1234
+    "$(config $'modules = ["gh"]\n[env]\nTZ = "Europe/Berlin"')"
+expect_line "the user's variables reach the modules" "FITOUT_USER=fitout" "$(config "")"
+expect_line "PUID defaults to 1000" "PUID=1000" "$(config "")"
+expect_line "PUID comes from the environment" "PUID=1234" "$(config "")" PUID=1234
 
-# --- agent.toml ---------------------------------------------------------------
-expect_error "an unknown field in agent.toml" "unknown field modlues" "$(config $'[modlues]\ngh = "1.0.0"')"
-dir=$(config "") && sed -i 's/^format = 1$/format = 2/' "${dir}/agent.toml"
-expect_error "an unknown format of agent.toml" "agent.toml has format 2" "${dir}"
-expect_error "a missing agent.toml" "agent.toml not found" "${WORK}/nowhere"
+# --- fitout.toml --------------------------------------------------------------
+expect_error "an unknown field in fitout.toml" "unknown field puid" "$(config 'puid = 99')"
+dir=$(config "") && sed -i 's/^format = 1$/format = 2/' "${dir}/fitout.toml"
+expect_error "an unknown format of fitout.toml" "fitout.toml has format 2" "${dir}"
+expect_error "a missing fitout.toml" "fitout.toml not found" "${WORK}/nowhere"
 
 # --- the example ------------------------------------------------------------------
 dir=$(mktemp -d "${WORK}/example-XXXX")
 cp -r example/config/. "${dir}/"
-sed -i "s|^format = 1$|&\ncatalog = \"${CATALOG}\"|" "${dir}/agent.toml"
+sed -i "s|^format = 1$|&\ncatalog = \"${CATALOG}\"|" "${dir}/fitout.toml"
 expect_line "the example resolves" "claude-remote    catalog 1.0.0" "${dir}" CODE_SERVER_PASSWORD=x
 
 # --- the whole catalog ----------------------------------------------------------
-all=$(cd catalog && for f in *.toml; do printf '%s = "1.0.0"\n' "${f%.toml}"; done)
-dir=$(config $'[modules]\n'"${all}")
+all=$(cd catalog && for f in *.toml; do printf '"%s", ' "${f%.toml}"; done)
+dir=$(config "modules = [${all%, }]")
 out=$(plan "${dir}" OPENCODE_SERVER_PASSWORD=x)
 [ "$(order_of "${out}" | wc -w)" -eq "$(find catalog -name '*.toml' | wc -l)" ] \
     && pass "every catalog module resolves" || fail "every catalog module resolves" "${out}"
@@ -189,44 +182,19 @@ tasks=$(cd "${WORK}/mise/work" && MISE_SYSTEM_CONFIG_DIR="${WORK}/mise" MISE_CON
 grep -q "t3-pair" <<< "${tasks}" && grep -q "codex-remote-pair" <<< "${tasks}" \
     && pass "mise reads the config of all modules" || fail "mise reads the config of all modules" "${tasks}"
 
-# --- catalog history and checks ----------------------------------------------------
+# --- catalog checks ------------------------------------------------------------------
 repo="${WORK}/repo"
 mkdir -p "${repo}"
 cp -r scripts catalog "${repo}/"
-(
-    cd "${repo}" && git init -q && git add -A \
-        && git -c user.name=t -c user.email=t@t commit -qm one
-) || fail "git repository for the catalog tests"
-sed -i 's/^description = "GitHub CLI/description = "The GitHub CLI/' "${repo}/catalog/gh.toml"
-out=$("${repo}/scripts/check-catalog" HEAD 2>&1) \
-    && fail "a changed module must raise its version" "${out}" \
-    || { grep -q "gh.toml: changed" <<< "${out}" && pass "a changed module must raise its version" \
-        || fail "a changed module must raise its version" "${out}"; }
-sed -i 's/^version = "1.0.0"/version = "1.1.0"/' "${repo}/catalog/gh.toml"
-out=$("${repo}/scripts/check-catalog" HEAD 2>&1) && pass "a raised version passes" || fail "a raised version passes" "${out}"
-(cd "${repo}" && git -c user.name=t -c user.email=t@t commit -qam two)
-"${repo}/scripts/build-catalog" --history "${WORK}/published" > /dev/null 2>&1
-[ "$(jq -r '.modules.gh.versions | keys | join(" ")' "${WORK}/published/index.json")" = "1.0.0 1.1.0" ] \
-    && cmp -s catalog/gh.toml "${WORK}/published/gh/1.0.0.toml" \
-    && jq -e '.modules.gh.description | startswith("The GitHub")' "${WORK}/published/index.json" > /dev/null \
-    && pass "the history keeps every version, metadata from the newest" \
-    || fail "the history keeps every version, metadata from the newest" "$(cat "${WORK}/published/index.json")"
-sed -i 's/^description = .*/description = "changed"/' "${repo}/catalog/gh.toml"
-out=$("${repo}/scripts/build-catalog" --history "${WORK}/published2" 2>&1)
-grep -q "changed without a new version" <<< "${out}" \
-    && grep -q '^description = "The GitHub' "${WORK}/published2/gh/1.1.0.toml" \
-    && pass "a published version stays as it was first committed" \
-    || fail "a published version stays as it was first committed" "${out}"
 out=$(cd "${repo}" && printf '[env.TOKEN]\n[mise.tasks.t3-x]\nrun = "x"\n' >> catalog/gh.toml && scripts/check-catalog 2>&1)
 grep -q "variable TOKEN does not start with GH_" <<< "${out}" && grep -q "t3-x does not start with gh-" <<< "${out}" \
     && pass "variables, tasks and daemons carry the module name" \
     || fail "variables, tasks and daemons carry the module name" "${out}"
 
-# --- modules command ------------------------------------------------------------
-out=$(env -i PATH="${PATH}" HOME="${HOME}" CONTAINER_AGENT_CONFIG="$(config "")" \
-    CONTAINER_AGENT_CACHE="${WORK}/cache-list" "${CA}" modules 2>&1)
-[ "$(wc -l <<< "${out}")" -eq "$(find catalog -name '*.toml' | wc -l)" ] && grep -q '^t3 *service' <<< "${out}" \
-    && pass "modules lists the catalog" || fail "modules lists the catalog" "${out}"
+# --- run command ------------------------------------------------------------------
+out=$(env -i PATH="${PATH}" "${FITOUT}" run true 2>&1) \
+    && fail "run waits for the setup" "${out}" \
+    || { grep -q "setup has not finished" <<< "${out}" && pass "run waits for the setup" || fail "run waits for the setup" "${out}"; }
 
 echo
 if [ "${failures}" -gt 0 ]; then

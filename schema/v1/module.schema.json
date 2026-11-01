@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/joostme/container-agent/main/schema/v1/module.schema.json",
-  "title": "container-agent module, format 1",
-  "description": "One container-agent module: what it installs and runs. container-agent fields and [env] are defined here; [mise] is a mise config and [daemons] are pitchfork daemons, at the versions the image pins.",
+  "$id": "https://raw.githubusercontent.com/joostme/fitout/main/schema/v1/module.schema.json",
+  "title": "fitout module, format 1",
+  "description": "One fitout module: what it installs and runs. fitout fields and [env] are defined here; [mise] is a mise config and [daemons] are pitchfork daemons, at the versions the image pins.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -54,26 +54,6 @@
       },
       "uniqueItems": true
     },
-    "after": {
-      "description": "Modules to set up and start before this one, if they are enabled too.",
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/moduleName"
-      },
-      "uniqueItems": true
-    },
-    "arch": {
-      "description": "CPU architectures the module works on; omitted means all.",
-      "type": "array",
-      "items": {
-        "enum": [
-          "amd64",
-          "arm64"
-        ]
-      },
-      "minItems": 1,
-      "uniqueItems": true
-    },
     "next_steps": {
       "description": "What to do after the first start. Backticks mark commands run in the container.",
       "type": "array",
@@ -123,7 +103,7 @@
                   "$ref": "https://raw.githubusercontent.com/jdx/mise/v2026.10.22/schema/mise.json#/$defs/bootstrap_hook"
                 },
                 "post-tools": {
-                  "description": "Runs as the agent user after the tools of all modules, on every start.",
+                  "description": "Runs as the user after the tools of all modules, on every start.",
                   "$ref": "https://raw.githubusercontent.com/jdx/mise/v2026.10.22/schema/mise.json#/$defs/bootstrap_hook"
                 }
               }
@@ -133,7 +113,7 @@
       }
     },
     "daemons": {
-      "description": "Long-running processes as pitchfork daemons (https://pitchfork.jdx.dev). The image adds boot_start = true, dir = the workspace, mise = true and the agent user unless they are set.",
+      "description": "Long-running processes as pitchfork daemons (https://pitchfork.jdx.dev). The image adds boot_start = true, dir = the workspace, mise = true and the user unless they are set.",
       "type": "object",
       "propertyNames": {
         "$ref": "#/$defs/moduleName"

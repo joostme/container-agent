@@ -1,10 +1,11 @@
 #:schema ../schema/v1/module.schema.json
 format = 1
 name = "sshd"
-description = "SSH server for the agent user (key login only), e.g. for Remote-SSH from VS Code or Cursor"
+description = "SSH server for the user (key login only), e.g. for Remote-SSH from VS Code or Cursor"
 version = "1.0.0"
 tags = ["remote access", "ssh"]
-next_steps = ["Add your public key to ~/.ssh/authorized_keys, e.g. through the SSH key mount, then connect as agent"]
+requires = ["ssh"]
+next_steps = ["Add your public key to ~/.ssh/authorized_keys, e.g. through the SSH key mount of the ssh module, then connect as fitout"]
 
 [env.SSHD_PORT]
 type = "port"
@@ -20,13 +21,13 @@ description = "Port of the SSH server"
 [mise.bootstrap.hooks.post-packages]
 run = '''
 set -e
-keys="$AGENT_HOME/.local/state/sshd"
+keys="$FITOUT_HOME/.local/state/sshd"
 mkdir -p "$keys" /run/sshd
 [ -f "$keys/ssh_host_ed25519_key" ] || ssh-keygen -q -t ed25519 -N '' -f "$keys/ssh_host_ed25519_key"
-cat > /etc/ssh/sshd_config.d/container-agent.conf <<EOF
+cat > /etc/ssh/sshd_config.d/fitout.conf <<EOF
 Port $SSHD_PORT
 HostKey $keys/ssh_host_ed25519_key
-AllowUsers agent
+AllowUsers $FITOUT_USER
 PermitRootLogin no
 PasswordAuthentication no
 KbdInteractiveAuthentication no

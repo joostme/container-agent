@@ -5,14 +5,13 @@
 
 	interface Props {
 		doc: Doc;
-		/** Modules this one can require or come after. */
+		/** Modules this one can require. */
 		others: string[];
-		formats: number[];
 		onRemove: () => void;
 		onShare: () => Promise<void>;
 	}
 
-	let { doc = $bindable(), others, formats, onRemove, onShare }: Props = $props();
+	let { doc = $bindable(), others, onRemove, onShare }: Props = $props();
 
 	type Row = { name: string; spec: Doc };
 
@@ -43,7 +42,7 @@
 
 	const kind = $derived(Object.keys(table(doc.daemons)).length ? 'service' : 'app');
 	const id = $derived(`module-${text(doc.name) || 'new'}`);
-	const issues = $derived(problems(doc, formats));
+	const issues = $derived(problems(doc));
 
 	/** Drops form defaults, so the file only holds what was set. */
 	function clean(spec: Doc): Doc {
@@ -89,9 +88,9 @@
 		sync();
 	}
 
-	function toggle(key: 'requires' | 'after', name: string) {
-		const list = strings(doc[key]);
-		doc[key] = list.includes(name) ? list.filter((n) => n !== name) : [...list, name];
+	function toggle(name: string) {
+		const list = strings(doc.requires);
+		doc.requires = list.includes(name) ? list.filter((n) => n !== name) : [...list, name];
 		sync();
 	}
 
@@ -174,22 +173,17 @@
 		</div>
 	</div>
 
-	{#each [['requires', 'Requires', 'Enabled with this module and set up before it.'], ['after', 'After', 'Set up and started after these, if they are enabled.']] as [key, title, hint] (key)}
-		<div class="block">
-			<h4>{title}</h4>
-			<div class="chips">
-				{#each others as name (name)}
-					<button
-						type="button"
-						class="chip"
-						aria-pressed={strings(doc[key]).includes(name)}
-						onclick={() => toggle(key as 'requires' | 'after', name)}>{name}</button
-					>
-				{/each}
-			</div>
-			<small>{hint}</small>
+	<div class="block">
+		<h4>Requires</h4>
+		<div class="chips">
+			{#each others as name (name)}
+				<button type="button" class="chip" aria-pressed={strings(doc.requires).includes(name)} onclick={() => toggle(name)}
+					>{name}</button
+				>
+			{/each}
 		</div>
-	{/each}
+		<small>Enabled with this module and set up before it.</small>
+	</div>
 
 	<div class="block">
 		<h4>Tools <a href="https://mise.jdx.dev/registry.html" target="_blank" rel="noreferrer">mise registry</a></h4>
@@ -226,7 +220,7 @@
 			<small>After the apt packages, on every start: keep it repeatable.</small>
 		</div>
 		<div class="field">
-			<label for="{id}-user">Setup as the agent user</label>
+			<label for="{id}-user">Setup as the user</label>
 			<textarea
 				id="{id}-user"
 				value={hookRun('post-tools')}
@@ -291,7 +285,7 @@
 			</div>
 		{/each}
 		<button type="button" onclick={() => (tasks = [...tasks, { name: '', spec: {} }])}>Add command</button>
-		<small class="after">mise tasks; each becomes a command in the container, run as the agent user.</small>
+		<small class="after">mise tasks; each becomes a command in the container, run as the user.</small>
 	</div>
 
 	<div class="block" oninput={sync} onchange={sync}>

@@ -4,7 +4,7 @@ name = "opencode"
 description = "OpenCode server with its web UI"
 version = "1.0.0"
 tags = ["agent", "web ui"]
-requires = ["node"]
+requires = ["node", "git"]
 next_steps = ["Open the OpenCode web UI and sign in as opencode with OPENCODE_SERVER_PASSWORD"]
 
 [env.OPENCODE_PORT]

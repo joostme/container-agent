@@ -11,10 +11,10 @@ next_steps = ["Pair the ChatGPT app: `codex-remote-pair`, then enter the code in
 description = "Short-lived pairing code for the ChatGPT app"
 run = "codex remote-control pair"
 
-# Finishes once Codex is logged in (`agent-run codex login --device-auth`)
+# Finishes once Codex is logged in (`fitout run codex login --device-auth`)
 [daemons.codex-remote-login]
 run = '''
-codex login status > /dev/null 2>&1 || echo "Waiting for a Codex login: agent-run codex login --device-auth"
+codex login status > /dev/null 2>&1 || echo "Waiting for a Codex login: fitout run codex login --device-auth"
 until codex login status > /dev/null 2>&1; do sleep 30; done
 '''
 oneshot = true

@@ -6,14 +6,12 @@
 #   it for variables mise reads itself (`MISE_NODE_VERSION`); tasks and
 #   daemons are the module name or start with it and a dash
 # - no variable, task or daemon is defined by two modules
-# - `requires` and `after` name catalog modules
-# - with a base ref: every changed module raises its version
+# - `requires` names catalog modules
 #
-#   scripts/check-catalog [<base ref>]
+#   scripts/check-catalog
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-base=${1:-}
 modules=$(for file in catalog/*.toml; do
     yq -p toml -o json '.' "${file}" | jq --arg file "$(basename "${file}" .toml)" '{file: $file, module: .}'
 done | jq -s '.')
@@ -34,22 +32,12 @@ problems=$(jq -r '
           ((($m.mise.tasks // {}) + ($m.daemons // {})) | keys[]
             | select(. != $file and (startswith($file + "-") | not))
             | "\($file): task or daemon \(.) does not start with \($file)-"),
-          ((($m.requires // []) + ($m.after // []))[]
+          (($m.requires // [])[]
             | select(IN($names[]) | not) | "\($file): \(.) is not in the catalog")),
       ($defs | map(.name as $n | .keys[] | {key: ., name: $n}) | group_by(.key)[]
         | select(length > 1) | "\(.[0].key) is defined by \(map(.name) | join(" and "))")
 ' <<< "${modules}")
 
-if [ -n "${base}" ]; then
-    while read -r file; do
-        [ -f "${file}" ] || continue
-        old=$(git show "${base}:${file}" 2> /dev/null | yq -p toml -o yaml '.version' 2> /dev/null) || continue
-        new=$(yq -p toml -o yaml '.version' "${file}")
-        if [ "${old}" = "${new}" ] || [ "$(printf '%s\n%s\n' "${old}" "${new}" | sort -V | tail -1)" != "${new}" ]; then
-            problems+=$'\n'"${file}: changed, so its version must be raised above ${old}"
-        fi
-    done < <(git diff --name-only "${base}" -- 'catalog/*.toml')
-fi
 
 problems=$(sed '/^$/d' <<< "${problems}")
 if [ -n "${problems}" ]; then

@@ -1,33 +1,25 @@
 <script lang="ts">
-	import type { CatalogEntry, Module } from '#lib/types.js';
+	import type { Module } from '#lib/types.js';
 	import Inline from './Inline.svelte';
 
 	interface Props {
-		name: string;
-		entry: CatalogEntry;
-		/** File of the shown version, once loaded. */
-		module: Module | undefined;
+		module: Module;
 		picked: boolean;
 		/** Modules that require this one; it is enabled through them. */
 		requiredBy: string[];
-		/** Versions the selected image reads, newest first. */
-		versions: string[];
-		/** The version in use, when enabled. */
-		version: string | null;
 		/** Replaced by a custom module of the same name. */
 		replaced: boolean;
 		onToggle: () => void;
-		onVersion: (version: string) => void;
 	}
 
-	let { name, entry, module, picked, requiredBy, versions, version, replaced, onToggle, onVersion }: Props = $props();
+	let { module, picked, requiredBy, replaced, onToggle }: Props = $props();
 
 	const enabled = $derived(picked || requiredBy.length > 0);
 	const locked = $derived(!picked && requiredBy.length > 0);
 	const ports = $derived(
-		(module?.env ?? []).filter((v) => v.type === 'port').map((v) => `${v.default}/${v.protocol ?? 'tcp'}`)
+		module.env.filter((v) => v.type === 'port').map((v) => `${v.default}/${v.protocol ?? 'tcp'}`)
 	);
-	const secrets = $derived((module?.env ?? []).filter((v) => v.type === 'secret').map((v) => v.name));
+	const secrets = $derived(module.env.filter((v) => v.type === 'secret').map((v) => v.name));
 </script>
 
 <div class="card" class:enabled class:locked>
@@ -35,39 +27,25 @@
 		<input type="checkbox" checked={enabled} disabled={locked || replaced} onchange={onToggle} />
 		<div class="body">
 			<div class="head">
-				<span class="name">{name}</span>
+				<span class="name">{module.name}</span>
+				{#if module.version}<span class="tag">{module.version}</span>{/if}
 				{#if locked}<span class="tag">needed by {requiredBy.join(', ')}</span>{/if}
 				{#if replaced}<span class="tag">replaced by your custom module</span>{/if}
 			</div>
-			<p><Inline text={entry.description} /></p>
+			<p><Inline text={module.description} /></p>
 		</div>
 	</label>
 	<div class="chips">
-		{#each entry.tags as tag (tag)}<span class="chip tagchip">{tag}</span>{/each}
-		{#each entry.requires as dep (dep)}<span class="chip">needs {dep}</span>{/each}
+		{#each module.tags as tag (tag)}<span class="chip tagchip">{tag}</span>{/each}
+		{#each module.requires as dep (dep)}<span class="chip">needs {dep}</span>{/each}
 		{#each ports as port (port)}<span class="chip">port {port}</span>{/each}
-		{#each module?.commands ?? [] as command (command)}<span class="chip mono" title="command in the container">{command}</span>{/each}
+		{#each module.commands as command (command)}<span class="chip mono" title="command in the container">{command}</span>{/each}
 		{#each secrets as secret (secret)}<span class="chip" title="reads this secret">secret {secret}</span>{/each}
-		{#each module?.root ?? [] as part (part.what)}
+		{#each module.root as part (part.what)}
 			<span class="chip root" title={part.run}>root: {part.what}</span>
 		{/each}
-		{#if module?.arch}<span class="chip">only {module.arch.join(', ')}</span>{/if}
 	</div>
-	{#if enabled && version && !replaced}
-		<div class="version">
-			<select
-				aria-label="Version of {name}"
-				value={version}
-				onchange={(e) => onVersion(e.currentTarget.value)}
-			>
-				{#if !versions.includes(version)}<option value={version}>{version} (not for this image)</option>{/if}
-				{#each versions as v, i (v)}
-					<option value={v}>{v}{i === 0 ? ' (newest)' : ''}</option>
-				{/each}
-			</select>
-			{#if entry.homepage}<a href={entry.homepage} target="_blank" rel="noreferrer">homepage</a>{/if}
-		</div>
-	{/if}
+	{#if module.homepage}<a class="homepage" href={module.homepage} target="_blank" rel="noreferrer">homepage</a>{/if}
 </div>
 
 <style>
@@ -149,14 +127,7 @@
 		background: var(--warn-bg);
 		color: var(--warn);
 	}
-	.version {
-		display: flex;
-		gap: 0.6rem;
-		align-items: center;
+	.homepage {
 		font-size: 0.85rem;
-	}
-	.version select {
-		width: auto;
-		padding: 0.2rem 0.4rem;
 	}
 </style>

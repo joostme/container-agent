@@ -1,187 +1,58 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { SvelteMap } from 'svelte/reactivity';
 	import ModuleCard from '#lib/components/ModuleCard.svelte';
 	import ModuleEditor from '#lib/components/ModuleEditor.svelte';
 	import OutputPanel from '#lib/components/OutputPanel.svelte';
 	import VarField from '#lib/components/VarField.svelte';
-	import { Catalog, key, newestVersion, OFFICIAL_CATALOG, versionsFor, compareVersions } from '#lib/catalog.js';
-	import { diffLines, type DiffLine } from '#lib/diff.js';
-	import enginesJson from '#lib/engines.json';
-	import { customModules, defaultConfig, generate } from '#lib/generate.js';
+	import { catalog } from '#lib/catalog.js';
+	import { customModules, defaultConfig, generate, usesSshKeys } from '#lib/generate.js';
 	import miseTools from '#lib/mise-tools.json';
-	import { describe, emptyModule, text, toToml } from '#lib/module.js';
+	import { emptyModule, text } from '#lib/module.js';
 	import { resolve } from '#lib/resolve.js';
-	import {
-		decodeHash,
-		demoteRequired,
-		encodeConfig,
-		encodeModule,
-		importFiles,
-		review,
-		type Review
-	} from '#lib/share.js';
-	import type { CatalogIndex, Config, Engine, Module } from '#lib/types.js';
+	import { decodeHash, encodeConfig, encodeModule, importFiles, review, type Review } from '#lib/share.js';
+	import type { Config } from '#lib/types.js';
 
-	const engines = enginesJson as Engine[];
-	const repo = 'https://github.com/joostme/container-agent';
+	const repo = 'https://github.com/joostme/fitout';
 
-	let config = $state<Config>(defaultConfig(engines));
+	let config = $state<Config>(defaultConfig());
 	/** Bumped when config is replaced as a whole, so editors start fresh. */
 	let generation = $state(0);
 	let ready = $state(false);
 
-	// --- catalog ------------------------------------------------------------------
-	let index = $state<CatalogIndex>({ format: 1, modules: {} });
-	let catalogError = $state('');
-	const files = new SvelteMap<string, Module>();
-	const failed = new SvelteMap<string, string>();
-	let catalog: Catalog | null = null;
-
-	// The official catalog is served next to this page; others are fetched from their URL
-	const catalogUrl = $derived(
-		!config.catalog || config.catalog.replace(/\/$/, '') === OFFICIAL_CATALOG ? '' : config.catalog
-	);
-
-	$effect(() => {
-		const base = catalogUrl || new URL('catalog', document.baseURI).href.replace(/\/$/, '');
-		const current = new Catalog(base);
-		catalog = current;
-		files.clear();
-		failed.clear();
-		catalogError = '';
-		current
-			.index()
-			.then((loaded) => {
-				if (catalog === current) index = loaded;
-			})
-			.catch((error: Error) => {
-				if (catalog === current) {
-					index = { format: 1, modules: {} };
-					catalogError = error.message;
-				}
-			});
-	});
-
-	function load(name: string, version: string) {
-		const id = key(name, version);
-		if (files.has(id) || failed.has(id) || loading.has(id) || !catalog) return;
-		loading.add(id);
-		const current = catalog;
-		current
-			.module(index, name, version)
-			.then((module) => current === catalog && files.set(id, module))
-			.catch((error: Error) => current === catalog && failed.set(id, error.message))
-			.finally(() => loading.delete(id));
-	}
-	const loading = new Set<string>();
-
-	// --- engine and resolution ---------------------------------------------------------
-	const engine = $derived<Engine>(
-		engines.find((e) => e.image === config.image) ?? {
-			image: config.image,
-			formats: engines.at(-1)?.formats ?? [1]
-		}
-	);
 	const custom = $derived(new Map(customModules(config).map((m) => [m.name, m])));
-	const resolution = $derived(
-		resolve(config, { index, formats: engine.formats, files, custom })
-	);
-	const output = $derived(generate(config, resolution, index, engine));
+	const resolution = $derived(resolve(config, catalog, custom));
+	const output = $derived(generate(config, resolution, catalog));
 	const configurable = $derived(resolution.order.filter((m) => m.env.length > 0));
-
-	// newest versions for the cards, and whatever the resolution still needs
-	$effect(() => {
-		for (const name of Object.keys(index.modules)) {
-			const version = newestVersion(index, name, engine.formats);
-			if (version) load(name, version);
-		}
-		for (const { name, version } of resolution.missing) load(name, version);
-	});
-
-	/** After loading agent.toml: required modules become pins once all files are there. */
-	let settle = $state(false);
-	$effect(() => {
-		if (settle && !resolution.missing.length && Object.keys(index.modules).length) {
-			settle = false;
-			config = demoteRequired(config, resolution);
-		}
-	});
 
 	// --- catalog view --------------------------------------------------------------------
 	let search = $state('');
 	let activeTags = $state<string[]>([]);
-	const allTags = $derived(
-		[...new Set(Object.values(index.modules).flatMap((m) => m.tags))].sort((a, b) => a.localeCompare(b))
-	);
+	const allTags = [...new Set([...catalog.values()].flatMap((m) => m.tags))].sort((a, b) => a.localeCompare(b));
 	const visible = $derived(
-		Object.entries(index.modules)
-			.filter(([name, entry]) => {
-				const enabled = resolution.source.has(name);
-				const words = `${name} ${entry.description} ${entry.tags.join(' ')}`.toLowerCase();
-				return (
-					enabled ||
-					((!search || words.includes(search.toLowerCase())) &&
-						activeTags.every((t) => entry.tags.includes(t)))
-				);
-			})
-			.sort(([a], [b]) => a.localeCompare(b))
-	);
-	const groups = $derived([
-		{ title: 'Services', hint: 'Run a process: remote control, web UIs, servers', kind: 'service' },
-		{ title: 'Apps', hint: 'Install and set up: agents, CLIs, runtimes', kind: 'app' }
-	].map((g) => ({ ...g, modules: visible.filter(([, e]) => e.kind === g.kind) })));
-
-	const versionOf = (name: string): string | null => {
-		const source = resolution.source.get(name);
-		return source?.kind === 'catalog' ? source.version : null;
-	};
-	const cardModule = (name: string) => {
-		const version = versionOf(name) ?? newestVersion(index, name, engine.formats);
-		return version ? files.get(key(name, version)) : undefined;
-	};
-
-	function toggle(name: string) {
-		const { [name]: removed, ...rest } = config.modules;
-		config.modules = removed ? rest : { ...rest, [name]: newestVersion(index, name, engine.formats) ?? 'latest' };
-		if (!removed) delete config.pins[name];
-	}
-
-	function setVersion(name: string, version: string) {
-		if (name in config.modules) config.modules[name] = version;
-		else config.pins = { ...config.pins, [name]: version };
-	}
-
-	// --- updates ------------------------------------------------------------------------
-	const updates = $derived(
-		[...resolution.source].flatMap(([name, source]) => {
-			if (source.kind !== 'catalog') return [];
-			const newest = newestVersion(index, name, engine.formats);
-			return newest && compareVersions(source.version, newest) > 0 ? [{ name, from: source.version, to: newest }] : [];
+		[...catalog.values()].filter((module) => {
+			const words = `${module.name} ${module.description} ${module.tags.join(' ')}`.toLowerCase();
+			return (
+				resolution.source.has(module.name) ||
+				((!search || words.includes(search.toLowerCase())) && activeTags.every((t) => module.tags.includes(t)))
+			);
 		})
 	);
-	let diff = $state<{ name: string; from: string; to: string; lines: DiffLine[] | null } | null>(null);
-	let diffDialog: HTMLDialogElement;
+	const groups = $derived(
+		[
+			{ title: 'Services', hint: 'Run a process: remote control, web UIs, servers', kind: 'service' },
+			{ title: 'Apps', hint: 'Install and set up: CLIs, agents, runtimes, shells', kind: 'app' }
+		].map((g) => ({ ...g, modules: visible.filter((m) => m.kind === g.kind) }))
+	);
 
-	async function showDiff(update: { name: string; from: string; to: string }) {
-		diff = { ...update, lines: null };
-		diffDialog.showModal();
-		load(update.name, update.from);
-		load(update.name, update.to);
-		const sourceOf = (version: string) => catalog?.sources.get(key(update.name, version));
-		for (let i = 0; i < 50 && (!sourceOf(update.from) || !sourceOf(update.to)); i++) {
-			await new Promise((r) => setTimeout(r, 100));
-		}
-		if (diff?.name === update.name) diff.lines = diffLines(sourceOf(update.from) ?? '', sourceOf(update.to) ?? '');
-	}
-
-	function applyUpdates(list: { name: string; to: string }[]) {
-		for (const update of list) setVersion(update.name, update.to);
+	function toggle(name: string) {
+		config.modules = config.modules.includes(name)
+			? config.modules.filter((n) => n !== name)
+			: [...config.modules, name].sort();
 	}
 
 	// --- custom modules -------------------------------------------------------------------
 	function addCustom() {
-		const taken = new Set([...Object.keys(index.modules), ...config.custom.map((m) => text(m.name))]);
+		const taken = new Set([...catalog.keys(), ...config.custom.map((m) => text(m.name))]);
 		let n = 1;
 		while (taken.has(`custom-${n}`)) n++;
 		config.custom = [...config.custom, emptyModule(`custom-${n}`)];
@@ -199,18 +70,20 @@
 
 	const secrets = $derived(
 		new Set(
-			[...files.values(), ...custom.values()].flatMap((m) => m.env.filter((v) => v.type === 'secret').map((v) => v.name))
+			[...catalog.values(), ...custom.values()].flatMap((m) =>
+				m.env.filter((v) => v.type === 'secret').map((v) => v.name)
+			)
 		)
 	);
 
 	function loadHash() {
-		const hash = decodeHash(location.hash, engines);
+		const hash = decodeHash(location.hash);
 		if (hash.kind === 'config') {
 			config = hash.config;
 			generation++;
 		} else if (hash.kind === 'module') {
 			try {
-				shared = { source: hash.source, review: review(hash.source, engine.formats) };
+				shared = { source: hash.source, review: review(hash.source) };
 				reviewDialog.showModal();
 			} catch (error) {
 				importError = `The module in the link is not valid TOML: ${(error as Error).message}`;
@@ -228,7 +101,7 @@
 
 	// Keep the link in the address bar current (without secrets), unless it shows a module
 	$effect(() => {
-		const hash = encodeConfig($state.snapshot(config) as Config, engines, secrets);
+		const hash = encodeConfig($state.snapshot(config) as Config, secrets);
 		if (ready && !shared) history.replaceState(history.state, '', `#${hash}`);
 	});
 
@@ -273,11 +146,10 @@
 				const yaml = /^\s*services\s*:/m.test(importText);
 				input.push({ path: yaml ? 'compose.yaml' : 'pasted.toml', text: importText });
 			}
-			const imported = importFiles(input, engines);
+			const imported = importFiles(input, catalog);
 			config = imported.config;
 			importNotes = imported.notes;
 			generation++;
-			settle = true;
 			importDialog.close();
 			importText = '';
 			importFilesList = [];
@@ -287,7 +159,7 @@
 	}
 
 	function reset() {
-		config = defaultConfig(engines);
+		config = defaultConfig();
 		importNotes = [];
 		generation++;
 	}
@@ -295,10 +167,10 @@
 
 <header>
 	<div class="title">
-		<h1>container-agent <span>configurator</span></h1>
+		<h1>fitout <span>configurator</span></h1>
 		<p>
-			Pick modules from the catalog or write your own, fill in their settings and get <code>agent.toml</code> and
-			<code>compose.yaml</code> for <a href={repo}>container-agent</a>.
+			Fit out a plain container: pick tools, apps and services from the catalog or write your own, fill in their
+			settings and get <code>fitout.toml</code> and <code>compose.yaml</code> for <a href={repo}>fitout</a>.
 		</p>
 	</div>
 	<div class="header-actions">
@@ -318,9 +190,6 @@
 
 		<section>
 			<h2><span>1</span> Modules</h2>
-			{#if catalogError}
-				<p class="error">Catalog not available: {catalogError}</p>
-			{/if}
 			<div class="filter">
 				<input type="search" bind:value={search} placeholder="Search modules" aria-label="Search modules" />
 				<div class="chips">
@@ -339,26 +208,21 @@
 				{#if group.modules.length}
 					<h3>{group.title} <span>{group.hint}</span></h3>
 					<div class="cards">
-						{#each group.modules as [name, entry] (name)}
+						{#each group.modules as module (module.name)}
 							<ModuleCard
-								{name}
-								{entry}
-								module={cardModule(name)}
-								picked={name in config.modules}
-								requiredBy={resolution.source.has(name) && !(name in config.modules)
-									? (resolution.requiredBy.get(name) ?? [])
+								{module}
+								picked={config.modules.includes(module.name)}
+								requiredBy={resolution.source.has(module.name) && !config.modules.includes(module.name)
+									? (resolution.requiredBy.get(module.name) ?? [])
 									: []}
-								versions={versionsFor(index, name, engine.formats)}
-								version={versionOf(name)}
-								replaced={custom.has(name)}
-								onToggle={() => toggle(name)}
-								onVersion={(v) => setVersion(name, v)}
+								replaced={custom.has(module.name)}
+								onToggle={() => toggle(module.name)}
 							/>
 						{/each}
 					</div>
 				{/if}
 			{/each}
-			{#if !visible.length && Object.keys(index.modules).length}
+			{#if !visible.length}
 				<p class="empty">No module matches.</p>
 			{/if}
 		</section>
@@ -381,10 +245,9 @@
 				{#each config.custom as _, i (i)}
 					<ModuleEditor
 						bind:doc={config.custom[i]}
-						others={[...Object.keys(index.modules), ...config.custom.map((m) => text(m.name))]
+						others={[...catalog.keys(), ...config.custom.map((m) => text(m.name))]
 							.filter((n, j, all) => n && n !== text(config.custom[i].name) && all.indexOf(n) === j)
 							.sort()}
-						formats={engine.formats}
 						onRemove={() => {
 							config.custom = config.custom.filter((_, j) => j !== i);
 							generation++;
@@ -417,14 +280,9 @@
 			<h2><span>4</span> Container</h2>
 			<div class="grid">
 				<div class="field">
-					<label for="image">Image version</label>
-					<select id="image" bind:value={config.image}>
-						{#if !engines.some((e) => e.image === config.image)}<option value={config.image}>{config.image}</option>{/if}
-						{#each engines as e (e.image)}
-							<option value={e.image}>{e.image === 'latest' ? 'latest (main, unreleased changes)' : e.image}</option>
-						{/each}
-					</select>
-					<small>Reads module format {engine.formats.join(', ')}; only fitting module versions are offered.</small>
+					<label for="image">Image tag</label>
+					<input id="image" bind:value={config.image} spellcheck="false" />
+					<small><code>latest</code> follows main, or a release such as <code>0.3</code>.</small>
 				</div>
 				<div class="field">
 					<label for="service">Service and host name</label>
@@ -444,31 +302,24 @@
 				<div class="field">
 					<label for="data">Data directory on the host</label>
 					<input id="data" bind:value={config.dataDir} />
-					<small>Holds <code>home</code> (logins, tools) and <code>repos</code>.</small>
+					<small>Holds <code>home</code> (logins, tools) and <code>workspace</code> (your projects or data).</small>
 				</div>
-				<div class="field">
-					<label for="workspace">Workspace in the container</label>
-					<input id="workspace" bind:value={config.workspace} />
-					<small>Working directory of the agents and daemons.</small>
-				</div>
-				<div class="field">
-					<label for="ssh">SSH keys on the host</label>
-					<input id="ssh" bind:value={config.sshKeys} placeholder="e.g. ~/.ssh, empty for none" />
-					<small>Mounted read-only and copied into <code>~/.ssh</code>.</small>
-				</div>
+				{#if usesSshKeys(resolution.order)}
+					<div class="field">
+						<label for="ssh">SSH keys on the host</label>
+						<input id="ssh" bind:value={config.sshKeys} placeholder="e.g. ~/.ssh, empty for none" />
+						<small>Mounted read-only; the ssh module copies them into <code>~/.ssh</code>.</small>
+					</div>
+				{/if}
 				<div class="field">
 					<label for="tz">Time zone</label>
 					<input id="tz" bind:value={config.tz} placeholder="e.g. Europe/Berlin" />
 				</div>
 				<div class="field">
 					<label for="catalog">Catalog</label>
-					<input id="catalog" bind:value={config.catalog} placeholder="official" spellcheck="false" />
-					<small>URL of another catalog with the same layout; it must allow cross-origin requests.</small>
+					<input id="catalog" bind:value={config.catalog} placeholder="official, on main" spellcheck="false" />
+					<small>Folder with the module files. To stay on one state, use the official one with a tag or commit instead of <code>main</code>.</small>
 				</div>
-				<label class="check">
-					<input type="checkbox" bind:checked={config.autoUpdate} />
-					Upgrade tools tracked as latest on every start
-				</label>
 				<label class="check">
 					<input type="checkbox" bind:checked={config.inline} />
 					Everything in compose.yaml (<code>configs:</code>, Docker Compose 2.23 or later)
@@ -483,29 +334,7 @@
 				{#each output.warnings as warning (warning)}<li>{warning}</li>{/each}
 			</ul>
 		{/if}
-		{#if failed.size}
-			<ul class="warnings">
-				{#each [...failed] as [id, message] (id)}<li>{id}: {message}</li>{/each}
-			</ul>
-		{/if}
-		{#if updates.length}
-			<div class="updates">
-				<strong>Updates</strong>
-				{#each updates as update (update.name)}
-					<div class="update">
-						<code>{update.name}</code>
-						{update.from} → {update.to}
-						<button onclick={() => showDiff(update)}>Changes</button>
-						<button onclick={() => applyUpdates([update])}>Update</button>
-					</div>
-				{/each}
-				{#if updates.length > 1}<button class="primary" onclick={() => applyUpdates(updates)}>Update all</button>{/if}
-			</div>
-		{/if}
-		{#if resolution.missing.length}
-			<p class="empty">Loading modules…</p>
-		{/if}
-		<OutputPanel {output} folder={config.service || 'agent'} />
+		<OutputPanel {output} folder={config.service || 'fitout'} />
 	</aside>
 </main>
 
@@ -513,7 +342,7 @@
 	<form method="dialog" onsubmit={(e) => (e.preventDefault(), applyImport())}>
 		<h2>Load files</h2>
 		<p>
-			Pick or paste what the configurator wrote: <code>compose.yaml</code>, <code>agent.toml</code> and module files,
+			Pick or paste what the configurator wrote: <code>compose.yaml</code>, <code>fitout.toml</code> and module files,
 			in any combination. Secrets live in <code>.env</code>; enter them again.
 		</p>
 		<input type="file" accept=".yaml,.yml,.toml" multiple onchange={pickFiles} />
@@ -547,7 +376,7 @@
 					<pre><code>{part.run}</code></pre>
 				{/each}
 			{:else}
-				<p class="empty">Nothing; everything runs as the agent user.</p>
+				<p class="empty">Nothing; everything runs as the user.</p>
 			{/if}
 			<h3>Secrets it reads</h3>
 			<p class="empty">{shared.review.secrets.length ? shared.review.secrets.join(', ') : 'None declared.'}</p>
@@ -558,31 +387,6 @@
 				<button type="button" class="primary" onclick={() => closeReview(true)}>
 					{config.custom.some((m) => text(m.name) === text(doc.name)) ? 'Replace my module' : 'Add as custom module'}
 				</button>
-			</div>
-		</div>
-	{/if}
-</dialog>
-
-<dialog bind:this={diffDialog} onclose={() => (diff = null)}>
-	{#if diff}
-		<div class="review">
-			<h2><code>{diff.name}</code> {diff.from} → {diff.to}</h2>
-			{#if diff.lines}
-				<pre class="diff">{#each diff.lines as line, i (i)}<span class={line.kind}>{line.kind === 'add' ? '+ ' : line.kind === 'remove' ? '- ' : '  '}{line.text}
-</span>{/each}</pre>
-			{:else}
-				<p class="empty">Loading…</p>
-			{/if}
-			<div class="dialog-actions">
-				<button type="button" onclick={() => diffDialog.close()}>Close</button>
-				<button
-					type="button"
-					class="primary"
-					onclick={() => {
-						if (diff) applyUpdates([diff]);
-						diffDialog.close();
-					}}>Update</button
-				>
 			</div>
 		</div>
 	{/if}
@@ -737,26 +541,6 @@
 		color: var(--warn);
 		font-size: 0.88rem;
 	}
-	.updates {
-		display: grid;
-		gap: 0.4rem;
-		padding: 0.6rem 0.8rem;
-		border: 1px solid var(--accent);
-		border-radius: var(--radius);
-		background: var(--accent-soft);
-		font-size: 0.9rem;
-	}
-	.update {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-		align-items: center;
-	}
-	.update button,
-	.updates > button {
-		padding: 0.15rem 0.6rem;
-		justify-self: start;
-	}
 	dialog {
 		width: min(760px, 94vw);
 		max-height: 90vh;
@@ -799,13 +583,6 @@
 		border-radius: var(--radius);
 		background: var(--warn-bg);
 		color: var(--warn);
-	}
-	.diff .add {
-		color: var(--ok);
-	}
-	.diff .remove {
-		color: var(--warn);
-		text-decoration: line-through;
 	}
 	.error {
 		color: var(--warn) !important;

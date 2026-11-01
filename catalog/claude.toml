@@ -1,11 +1,11 @@
 #:schema ../schema/v1/module.schema.json
 format = 1
 name = "claude"
-description = "Claude Code CLI; log in once with `agent-run claude` and /login"
+description = "Claude Code CLI; log in once with `fitout run claude` and /login"
 version = "1.0.0"
 tags = ["agent", "anthropic"]
-requires = ["node"]
-next_steps = ["Log in once: `agent-run claude`, then type /login in the Claude prompt"]
+requires = ["node", "git"]
+next_steps = ["Log in once: `fitout run claude`, then type /login in the Claude prompt"]
 
 [env.CLAUDE_CONFIG_DIR]
 type = "path"
@@ -22,7 +22,7 @@ set -e
 f="${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
 mkdir -p "$(dirname "$f")"
 [ -s "$f" ] || echo '{}' > "$f"
-jq --arg ws "$AGENT_WORKSPACE" '.hasCompletedOnboarding = true
+jq --arg ws /workspace '.hasCompletedOnboarding = true
     | .remoteDialogSeen = true
     | .projects[$ws].hasTrustDialogAccepted = true' "$f" > "$f.tmp"
 cat "$f.tmp" > "$f"

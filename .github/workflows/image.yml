@@ -31,39 +31,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # yq for building the catalog
-      - uses: jdx/mise-action@v3
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
           context: .
           load: true
-          tags: container-agent:smoke
+          tags: fitout:smoke
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Configuration
         run: |
-          scripts/build-catalog smoke/catalog
           mkdir -p smoke/config
-          cat > smoke/config/agent.toml <<'EOF'
+          cat > smoke/config/fitout.toml <<'EOF'
           format = 1
           catalog = "/catalog"
-
-          [modules]
-          code-server = "latest"
-          sshd = "latest"
-          oh-my-zsh = "latest"
-          gh = "latest"
-          t3 = "latest"
-          codex = "latest"
+          modules = ["code-server", "sshd", "oh-my-zsh", "devtools", "gh", "t3", "codex"]
           EOF
       - name: Start container
         run: |
           docker run -d --name smoke \
-            -v "${PWD}/smoke/config:/etc/container-agent:ro" \
-            -v "${PWD}/smoke/catalog:/catalog:ro" \
+            -v "${PWD}/smoke/config:/etc/fitout:ro" \
+            -v "${PWD}/catalog:/catalog:ro" \
             -e CODE_SERVER_PASSWORD=smoke \
-            container-agent:smoke
+            fitout:smoke
       - name: Wait for healthy
         run: |
           for _ in $(seq 1 120); do
@@ -78,16 +68,22 @@ jobs:
           exit 1
       - name: Check daemons and tools
         run: |
-          docker exec smoke agent-run pitchfork list
-          for tool in code-server gh t3 codex; do docker exec smoke agent-run which "${tool}"; done
-          docker exec smoke agent-run grep -q '^sandbox_mode = "danger-full-access"' /home/agent/.codex/config.toml
+          docker exec smoke fitout run pitchfork list
+          for tool in code-server gh t3 codex git rg make; do docker exec smoke fitout run which "${tool}"; done
+          docker exec smoke fitout run grep -q '^sandbox_mode = "danger-full-access"' /home/fitout/.codex/config.toml
           # module tasks become commands
           for tool in qrencode t3-pair; do docker exec smoke which "${tool}"; done
           docker exec smoke t3-pair --help
-          # the catalog cache in the home belongs to the agent
-          test "$(docker exec smoke stat -c %U /home/agent/.cache/container-agent/catalog/t3)" = agent
-          docker exec smoke agent-run test -d /home/agent/.oh-my-zsh
-          docker exec smoke agent-run curl -sf -o /dev/null http://127.0.0.1:8080/healthz
+          # the catalog cache in the home belongs to the user
+          test "$(docker exec smoke stat -c %U /home/fitout/.cache/fitout/catalog/t3.toml)" = fitout
+          # zsh (through oh-my-zsh) is the login shell and finds the mise tools
+          test "$(docker exec smoke getent passwd fitout | cut -d: -f7)" = /usr/bin/zsh
+          docker exec smoke fitout run zsh -c 'which t3'
+          docker exec smoke fitout run test -d /home/fitout/.oh-my-zsh
+          docker exec smoke fitout run git config --global --get safe.directory
+          docker exec smoke fitout run curl -sf -o /dev/null http://127.0.0.1:8080/healthz
+          # the base image itself stays plain: git and zsh came from modules
+          docker run --rm --entrypoint sh fitout:smoke -c '! command -v git && ! command -v zsh'
           # module packages come without recommends (xauth is one of openssh-server)
           if docker exec smoke dpkg -s xauth > /dev/null 2>&1; then
             echo "apt installed recommended packages" >&2
@@ -97,7 +93,7 @@ jobs:
         if: always()
         run: |
           docker logs smoke || true
-          docker exec smoke agent-run pitchfork logs -n 100 || true
+          docker exec smoke fitout run pitchfork logs -n 100 || true
 
   publish:
     needs: smoke
@@ -137,8 +133,8 @@ jobs:
           cache-to: type=gha,mode=max
 
   # On a v* tag, after the image is out: a GitHub release with generated
-  # notes. The catalog and the configurator are released on their own, see
-  # pages.yml.
+  # notes. Containers read the catalog from the repository; the configurator
+  # deploys from pages.yml.
   release:
     needs: publish
     if: startsWith(github.ref, 'refs/tags/v')

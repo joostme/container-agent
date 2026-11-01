@@ -23,6 +23,4 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
 # Built by scripts/prepare.js
-/static/catalog
-/src/lib/engines.json
 /src/lib/mise-tools.json

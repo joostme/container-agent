@@ -1,0 +1,12 @@
+#:schema ../schema/v1/module.schema.json
+format = 1
+name = "devtools"
+description = "Everyday development tools: git, compilers and make (build-essential), ripgrep, ps and top"
+version = "1.0.0"
+tags = ["development"]
+requires = ["git"]
+
+[mise.bootstrap.packages]
+"apt:build-essential" = "latest"
+"apt:procps" = "latest"
+"apt:ripgrep" = "latest"
